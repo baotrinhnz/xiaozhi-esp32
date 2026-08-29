@@ -1,0 +1,34 @@
+name: VoCat Build (esp-vocat only)
+
+# Build RIÊNG board esp-vocat, trigger tay (workflow_dispatch) hoặc push nhánh 'vocat'.
+# Tránh matrix 171 board của build.yml gốc. Artifact = merged-binary.bin (flash offset 0x0).
+on:
+  workflow_dispatch:
+  push:
+    branches: [vocat]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build esp-vocat
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v6.0.2
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build esp-vocat
+        shell: bash
+        run: |
+          source $IDF_PATH/export.sh
+          python scripts/build.py espressif/esp-vocat --name esp-vocat
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: vocat-firmware-${{ github.sha }}
+          path: build/merged-binary.bin
+          if-no-files-found: error
