@@ -349,6 +349,15 @@ void Application::HandleActivationDoneEvent() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+
+    // VoCat: stream liên tục để NAS bắt wake tiếng Việt "Hi MeoMeo" (openWakeWord).
+    // Tự vào listening sau khi thiết bị sẵn sàng, thay vì chờ wake on-device.
+    // Giữ WakeNet on-device làm phao: nếu rớt kênh về idle, wake tiếng Trung vẫn cứu được.
+    Schedule([this]() {
+        if (GetDeviceState() == kDeviceStateIdle && protocol_ != nullptr) {
+            ToggleChatState();
+        }
+    });
 }
 
 void Application::ActivationTask() {
