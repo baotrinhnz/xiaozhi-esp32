@@ -9,7 +9,13 @@
                 "CONFIG_USE_EMOTE_MESSAGE_STYLE=y",
                 "CONFIG_MMAP_FILE_NAME_LENGTH=32",
                 "CONFIG_FLASH_EXPRESSION_ASSETS=y",
-                "CONFIG_USE_DEVICE_AEC=y"
+                "CONFIG_USE_AFE_WAKE_WORD=n",
+                "CONFIG_USE_CUSTOM_WAKE_WORD=y",
+                "CONFIG_CUSTOM_WAKE_WORD=\"hi meo meo\"",
+                "CONFIG_CUSTOM_WAKE_WORD_DISPLAY=\"Hi MeoMeo\"",
+                "CONFIG_CUSTOM_WAKE_WORD_THRESHOLD=20",
+                "CONFIG_SR_MN_EN_MULTINET6_QUANT=y",
+                "CONFIG_SR_WN_WN9_NIHAOMIAOBAN_TTS2=n"
             ]
         }
     ]
