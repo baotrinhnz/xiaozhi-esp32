@@ -3,7 +3,7 @@
 // Wake-word provider, adapted from ESPHome's micro_wake_word component
 // (github.com/esphome/esphome, (c) 2019 ESPHome) — GPLv3. See LICENSE.
 //
-// VoCat: rút gọn còn 1 model demo (hey_m5_v3) + thêm FeedMono() để nhận
+// VoCat: 1 model wake "Meo Meo" (tự train, microWakeWord) + thêm FeedMono() để nhận
 // PCM mono đã AEC từ AfeAudioEngine::HandleWakeWordResult (giống CustomWakeWord).
 
 #ifndef MICRO_WAKE_WORD_H

@@ -1064,7 +1064,7 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
         sdmmc
     )
 endif()
-# VoCat: nhúng model microWakeWord vào app binary (sinh symbol _binary_hey_m5_v3_tflite_start).
+# VoCat: nhúng model microWakeWord vào app binary (sinh symbol _binary_meo_meo_tflite_start).
 set(MWW_EMBED_FILES "")
 if(CONFIG_USE_MICRO_WAKE_WORD)
     list(APPEND MWW_EMBED_FILES "${CMAKE_CURRENT_SOURCE_DIR}/audio/wake_words/models/meo_meo.tflite")
