@@ -173,11 +173,14 @@ bool MicroWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) {
         return false;
     }
 
+    // Ưu tiên 2 (DƯỚI task fetch AFE = 3) để KHÔNG giành CPU làm AFE fetch bị đói
+    // → tránh "Ringbuffer of AFE(FEED) is full". Micro chạy trong lúc AFE rảnh
+    // (giữa các frame). Idle nhiều CPU nên vẫn dò kịp.
     xTaskCreate([](void* arg) {
         auto self = (MicroWakeWord*)arg;
         self->AudioDetectionTask();
         vTaskDelete(NULL);
-    }, "mww_detect", 4096, this, 3, nullptr);
+    }, "mww_detect", 4096, this, 2, nullptr);
 
     ESP_LOGI(TAG, "Initialized with model %s, cutoff=%.2f",
              kModels[active_index_].display, cutoff_ / 255.0f);
@@ -230,6 +233,13 @@ void MicroWakeWord::FeedMono(const int16_t* data, size_t samples) {
         return;
     }
     input_buffer_.insert(input_buffer_.end(), data, data + samples);
+    // Chặn tràn: nếu task dò xử lý không kịp realtime, bỏ audio CŨ (giữ tối đa
+    // ~1.5s) để tránh phình RAM. Wake word chỉ dài ~1s nên vẫn đủ.
+    constexpr size_t kMaxSamples = 16000 * 3 / 2;
+    if (input_buffer_.size() > kMaxSamples) {
+        input_buffer_.erase(input_buffer_.begin(),
+                            input_buffer_.begin() + (input_buffer_.size() - kMaxSamples));
+    }
 }
 
 size_t MicroWakeWord::GetFeedSize() {
