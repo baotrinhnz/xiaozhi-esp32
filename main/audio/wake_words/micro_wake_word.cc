@@ -21,11 +21,12 @@
 #define TAG "MicroWakeWord"
 
 // Model nhúng trong app binary (xem main/CMakeLists.txt EMBED_FILES).
-extern const uint8_t hey_m5_v3_start[] asm("_binary_hey_m5_v3_tflite_start");
+extern const uint8_t meo_meo_start[] asm("_binary_meo_meo_tflite_start");
 
 const MicroWakeWord::ModelEntry MicroWakeWord::kModels[MicroWakeWord::kModelCount] = {
-    // cutoff tinh chỉnh trên máy thật; giá trị .json probability_cutoff thường bảo thủ.
-    { "m5", "hey_m5_v3", hey_m5_v3_start, 217, "Hey M5" },
+    // "Meo Meo" tự train (microWakeWord, giọng vi_VN + augmentation). cutoff 102 = round(0.4*255);
+    // bảng train: cutoff 0.4 -> false-accept 0/giờ, false-reject 5.8%. Chỉnh tại đây, không cần train lại.
+    { "meo", "meo_meo", meo_meo_start, 102, "Meo Meo" },
 };
 
 int MicroWakeWord::ResolveModelId(const std::string& id) const {

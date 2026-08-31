@@ -1067,7 +1067,7 @@ endif()
 # VoCat: nhúng model microWakeWord vào app binary (sinh symbol _binary_hey_m5_v3_tflite_start).
 set(MWW_EMBED_FILES "")
 if(CONFIG_USE_MICRO_WAKE_WORD)
-    list(APPEND MWW_EMBED_FILES "${CMAKE_CURRENT_SOURCE_DIR}/audio/wake_words/models/hey_m5_v3.tflite")
+    list(APPEND MWW_EMBED_FILES "${CMAKE_CURRENT_SOURCE_DIR}/audio/wake_words/models/meo_meo.tflite")
 endif()
 idf_component_register(SRCS ${SOURCES}
                     EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${MWW_EMBED_FILES}

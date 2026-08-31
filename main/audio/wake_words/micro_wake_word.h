@@ -64,7 +64,7 @@ private:
     };
     static constexpr size_t kModelCount = 1;
     static const ModelEntry kModels[kModelCount];
-    static constexpr const char* kDefaultModelId = "m5";
+    static constexpr const char* kDefaultModelId = "meo";
 
     // Resolve an id to a kModels index; returns -1 if unknown.
     int ResolveModelId(const std::string& id) const;
