@@ -11,6 +11,9 @@
 
 #include "audio_service.h"
 #include "wake_words/custom_wake_word.h"
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+#include "wake_words/micro_wake_word.h"
+#endif
 
 #define TAG "AfeAudioEngine"
 
@@ -26,6 +29,9 @@ AfeAudioEngine::AfeAudioEngine() {
 
 AfeAudioEngine::~AfeAudioEngine() {
     custom_wake_word_.reset();
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+    micro_wake_word_.reset();
+#endif
     if (afe_data_ != nullptr) {
         afe_iface_->destroy(afe_data_);
     }
@@ -73,6 +79,28 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
         }
     }
 
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+    // VoCat: wake tiếng Việt on-device bằng microWakeWord (TFLite). ĐỨNG TRƯỚC
+    // WakeNet/MultiNet — ưu tiên dù gói asset emote vẫn kèm model WakeNet.
+    (void)multinet_model_name;
+    (void)wakenet_model_name;
+    wake_detector_ = WakeDetector::kMicroWakeWord;
+    micro_wake_word_ = std::make_unique<MicroWakeWord>();
+    micro_wake_word_->OnWakeWordDetected([this](const std::string& wake_word) {
+        last_detected_wake_word_ = wake_word;
+        xEventGroupClearBits(event_group_, kWakeWordEnabled);
+        UpdateActiveState();
+        if (wake_word_detected_callback_) {
+            wake_word_detected_callback_(wake_word);
+        }
+    });
+    if (!micro_wake_word_->Initialize(codec_, models_)) {
+        ESP_LOGE(TAG, "Failed to initialize microWakeWord detector");
+        micro_wake_word_.reset();
+        wake_detector_ = WakeDetector::kNone;
+        return false;
+    }
+#else
     if (multinet_model_name != nullptr) {
         wake_detector_ = WakeDetector::kMultiNet;
         custom_wake_word_ = std::make_unique<CustomWakeWord>();
@@ -106,6 +134,7 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
         }
 #endif
     }
+#endif  // CONFIG_USE_MICRO_WAKE_WORD
 
     const bool needs_afe = kUseAfeForVoiceProcessing || wake_detector_ != WakeDetector::kNone;
     if (!needs_afe) {
@@ -185,7 +214,8 @@ bool AfeAudioEngine::Initialize(AudioCodec* codec, int frame_duration_ms, srmode
 
     const char* detector = wake_detector_ == WakeDetector::kWakeNet
         ? "WakeNet"
-        : (wake_detector_ == WakeDetector::kMultiNet ? "MultiNet" : "none");
+        : (wake_detector_ == WakeDetector::kMultiNet ? "MultiNet"
+            : (wake_detector_ == WakeDetector::kMicroWakeWord ? "microWakeWord" : "none"));
     ESP_LOGI(TAG, "Initialized FD AFE, detector: %s, NS: off, feed: %d, fetch: %d",
         detector, afe_iface_->get_feed_chunksize(afe_data_), afe_iface_->get_fetch_chunksize(afe_data_));
     return true;
@@ -223,12 +253,22 @@ void AfeAudioEngine::EnableWakeWordDetection(bool enable) {
         if (wake_detector_ == WakeDetector::kMultiNet) {
             custom_wake_word_->Start();
         }
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+        if (wake_detector_ == WakeDetector::kMicroWakeWord) {
+            micro_wake_word_->Start();
+        }
+#endif
         xEventGroupSetBits(event_group_, kWakeWordEnabled);
     } else {
         xEventGroupClearBits(event_group_, kWakeWordEnabled);
         if (wake_detector_ == WakeDetector::kMultiNet) {
             custom_wake_word_->Stop();
         }
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+        if (wake_detector_ == WakeDetector::kMicroWakeWord) {
+            micro_wake_word_->Stop();
+        }
+#endif
     }
     UpdateActiveState();
 }
@@ -384,6 +424,14 @@ void AfeAudioEngine::ProcessingTask() {
 }
 
 void AfeAudioEngine::HandleWakeWordResult(const afe_fetch_result_t* result) {
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+    if (wake_detector_ == WakeDetector::kMicroWakeWord) {
+        // result->data: PCM 16kHz mono đã qua AEC/VAD của AFE.
+        micro_wake_word_->FeedMono(
+            result->data, result->data_size / sizeof(int16_t));
+        return;
+    }
+#endif
     if (wake_detector_ == WakeDetector::kMultiNet) {
         custom_wake_word_->FeedMono(
             result->data, result->data_size / sizeof(int16_t));
@@ -468,6 +516,12 @@ void AfeAudioEngine::OutputRawAudio(const std::vector<int16_t>& data) {
 }
 
 void AfeAudioEngine::EncodeWakeWordData() {
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+    if (wake_detector_ == WakeDetector::kMicroWakeWord) {
+        micro_wake_word_->EncodeWakeWordData();
+        return;
+    }
+#endif
     if (wake_detector_ == WakeDetector::kMultiNet) {
         custom_wake_word_->EncodeWakeWordData();
         return;
@@ -557,6 +611,11 @@ void AfeAudioEngine::EncodeWakeWordData() {
 }
 
 bool AfeAudioEngine::GetWakeWordOpus(std::vector<uint8_t>& opus) {
+#if defined(CONFIG_USE_MICRO_WAKE_WORD)
+    if (wake_detector_ == WakeDetector::kMicroWakeWord) {
+        return micro_wake_word_->GetWakeWordOpus(opus);
+    }
+#endif
     if (wake_detector_ == WakeDetector::kMultiNet) {
         return custom_wake_word_->GetWakeWordOpus(opus);
     }

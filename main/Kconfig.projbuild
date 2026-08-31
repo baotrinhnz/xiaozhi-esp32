@@ -944,6 +944,15 @@ config USE_AUDIO_PROCESSOR
         is not enabled because this project does not provide an NSNet model.
         Requires ESP32-S3, ESP32-P4, or ESP32-S31 with PSRAM.
 
+config USE_MICRO_WAKE_WORD
+    bool "Enable microWakeWord (on-device TFLite wake word)"
+    default n
+    depends on IDF_TARGET_ESP32S3 && SPIRAM && USE_AUDIO_PROCESSOR
+    help
+        VoCat: wake word tiếng Việt on-device bằng microWakeWord (TFLite-Micro).
+        Thay ESP-SR WakeNet/MultiNet làm bộ dò wake, vẫn giữ AFE cho AEC/VAD.
+        Model .tflite nhúng trong app binary. Chỉ ESP32-S3 + PSRAM.
+
 config USE_DEVICE_AEC
     bool "Enable Device-Side AEC"
     default n
