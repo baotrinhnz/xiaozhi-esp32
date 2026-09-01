@@ -3,6 +3,8 @@
 #include "display.h"
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstdint>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
 #include "expression_emote.h"
@@ -26,6 +28,11 @@ public:
     bool StopAnimDialog();
     bool InsertAnimDialog(const char* emoji_name, uint32_t duration_ms);
 
+    // VoCat "panel mode": hiện ảnh JPEG (fetch từ NAS) đè lên mặt mèo; HidePanel() trả về mặt mèo.
+    bool ShowPanelImage(const uint8_t* jpeg, size_t len);
+    void HidePanel();
+    bool IsPanelShown() const { return panel_shown_; }
+
     void RefreshAll();
 
     // Get emote handle for internal use
@@ -37,6 +44,9 @@ private:
 
     emote_handle_t emote_handle_ = nullptr;
 
+    void* panel_img_ = nullptr;             // gfx_obj_t* của ảnh panel (tạo 1 lần, tái dùng)
+    std::vector<uint8_t> panel_jpeg_;       // giữ JPEG sống trong khi engine dùng
+    bool panel_shown_ = false;
 };
 
 } // namespace emote

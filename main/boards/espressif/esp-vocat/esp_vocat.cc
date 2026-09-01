@@ -10,6 +10,9 @@
 
 #include <esp_log.h>
 #include <esp_timer.h>
+#include <esp_http_client.h>
+#include <esp_mac.h>
+#include <cstdio>
 #include <cinttypes>
 #include "esp_idf_version.h"
 
@@ -462,6 +465,13 @@ private:
     esp_timer_handle_t emotion_reset_timer_ = nullptr;
     bool bmi270_ready_ = false;
     bool was_charging_ = false;
+    // ===== VoCat panel mode (màn hình page: đồng hồ/lịch/thời tiết từ NAS, vuốt đổi) =====
+    static constexpr const char* PANEL_HOST = "http://192.168.1.4:8080";
+    bool panel_active_ = false;
+    int panel_n_ = 0;
+    int panel_count_ = 1;
+    uint32_t touch_t0_ = 0;
+    int touch_sx_ = 0, touch_sy_ = 0, touch_lx_ = 0, touch_ly_ = 0;
     uint8_t low_battery_alert_mask_ = 0;
     int low_battery_plays_left_ = 0;
     int64_t next_low_battery_play_ms_ = 0;
@@ -694,6 +704,75 @@ private:
         }
     }
 
+    // Tải ảnh page thứ n từ NAS (/panel?mac=<mac mèo>&n=) -> hiện lên màn (đè mặt mèo).
+    void FetchAndShowPanel(int n) {
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr) return;
+        uint8_t mac[6] = {0};
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        char url[160];
+        snprintf(url, sizeof(url), "%s/panel?mac=%02x:%02x:%02x:%02x:%02x:%02x&n=%d",
+                 PANEL_HOST, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], n);
+        esp_http_client_config_t cfg = {};
+        cfg.url = url;
+        cfg.timeout_ms = 8000;
+        esp_http_client_handle_t c = esp_http_client_init(&cfg);
+        if (c == nullptr) return;
+        uint8_t* buf = nullptr;
+        do {
+            if (esp_http_client_open(c, 0) != ESP_OK) break;
+            int clen = esp_http_client_fetch_headers(c);
+            if (clen <= 0 || clen > 200000) break;
+            char* cnt = nullptr;
+            if (esp_http_client_get_header(c, "X-Panel-Count", &cnt) == ESP_OK && cnt) {
+                int v = atoi(cnt);
+                if (v > 0) panel_count_ = v;
+            }
+            buf = (uint8_t*)malloc(clen);
+            if (buf == nullptr) break;
+            int off = 0, r = 0;
+            while (off < clen && (r = esp_http_client_read(c, (char*)buf + off, clen - off)) > 0) {
+                off += r;
+            }
+            if (off == clen && disp->ShowPanelImage(buf, clen)) {
+                panel_active_ = true;
+            }
+        } while (0);
+        if (buf) free(buf);
+        esp_http_client_close(c);
+        esp_http_client_cleanup(c);
+    }
+
+    void OnTouchStart(int x, int y) {
+        touch_t0_ = (uint32_t)(esp_timer_get_time() / 1000);
+        touch_sx_ = touch_lx_ = x;
+        touch_sy_ = touch_ly_ = y;
+    }
+
+    void OnTouchMove(int x, int y) { touch_lx_ = x; touch_ly_ = y; }
+
+    void OnTouchEnd() {
+        int dx = touch_lx_ - touch_sx_, dy = touch_ly_ - touch_sy_;
+        const int SW = 45;                                  // ngưỡng vuốt (px)
+        auto& app = Application::GetInstance();
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (abs(dx) >= SW && abs(dx) >= abs(dy)) {          // vuốt NGANG -> vào/đổi page
+            if (!panel_active_) panel_n_ = 0;
+            else panel_n_ += (dx < 0 ? 1 : -1);             // vuốt trái = trang kế, phải = trang trước
+            FetchAndShowPanel(panel_n_);
+        } else if (dy <= -SW && abs(dy) > abs(dx)) {        // vuốt LÊN -> thoát panel
+            if (panel_active_ && disp) { disp->HidePanel(); panel_active_ = false; }
+        } else {                                            // CHẠM (di chuyển nhỏ)
+            if (panel_active_ && disp) {                    // đang xem panel -> chạm để thoát
+                disp->HidePanel(); panel_active_ = false;
+            } else if (app.GetDeviceState() == kDeviceStateStarting) {
+                EnterWifiConfigMode();
+            } else {
+                app.ToggleChatState();                      // chạm thường = nói chuyện (như cũ)
+            }
+        }
+    }
+
     static void touch_event_task(void* arg) {
         Cst816s* touchpad = static_cast<Cst816s*>(arg);
         if (touchpad == nullptr) {
@@ -704,19 +783,19 @@ private:
 
         while (true) {
             if (touchpad->WaitForTouchEvent()) {
-                auto& app = Application::GetInstance();
                 auto& board = (EspVocat&)Board::GetInstance();
 
                 ESP_LOGD(TAG, "Touch event, TP_PIN_NUM_INT: %d", gpio_get_level(TP_PIN_NUM_INT));
                 touchpad->UpdateTouchPoint();
                 auto touch_event = touchpad->CheckTouchEvent();
+                const auto& tpt = touchpad->GetTouchPoint();
 
-                if (touch_event == Cst816s::TOUCH_RELEASE) {
-                    if (app.GetDeviceState() == kDeviceStateStarting) {
-                        board.EnterWifiConfigMode();
-                    } else {
-                        app.ToggleChatState();
-                    }
+                if (touch_event == Cst816s::TOUCH_PRESS) {
+                    board.OnTouchStart(tpt.x, tpt.y);
+                } else if (touch_event == Cst816s::TOUCH_HOLD) {
+                    board.OnTouchMove(tpt.x, tpt.y);
+                } else if (touch_event == Cst816s::TOUCH_RELEASE) {
+                    board.OnTouchEnd();       // quyết định: vuốt page / thoát / chạm nói chuyện
                 }
             }
         }

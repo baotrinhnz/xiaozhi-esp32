@@ -239,6 +239,51 @@ bool EmoteDisplay::InsertAnimDialog(const char* emoji_name, uint32_t duration_ms
     return false;
 }
 
+bool EmoteDisplay::ShowPanelImage(const uint8_t* jpeg, size_t len)
+{
+    if (!emote_handle_ || !jpeg || !len) {
+        return false;
+    }
+    emote_lock(emote_handle_);
+    panel_jpeg_.assign(jpeg, jpeg + len);           // giữ JPEG sống trong khi engine decode/hiện
+    if (panel_img_ == nullptr) {
+        panel_img_ = emote_create_obj_by_type(emote_handle_, "image", "panel_img");
+    }
+    if (panel_img_ == nullptr) {
+        emote_unlock(emote_handle_);
+        ESP_LOGE(TAG, "ShowPanelImage: create image obj failed");
+        return false;
+    }
+    gfx_obj_t* obj = (gfx_obj_t*)panel_img_;
+    gfx_jpeg_dsc_t jd = { panel_jpeg_.data(), (uint32_t)panel_jpeg_.size() };
+    gfx_img_src_t src = { GFX_IMG_SRC_TYPE_JPEG, &jd };
+    gfx_img_set_src_desc(obj, &src);
+    gfx_obj_set_size(obj, 360, 360);
+    gfx_obj_align(obj, GFX_ALIGN_CENTER, 0, 0);
+    emote_set_anim_visible(emote_handle_, false);   // giấu mặt mèo
+    gfx_obj_set_visible(obj, true);                 // hiện ảnh panel
+    emote_unlock(emote_handle_);
+    emote_notify_all_refresh(emote_handle_);
+    panel_shown_ = true;
+    ESP_LOGI(TAG, "ShowPanelImage: %u bytes", (unsigned)len);
+    return true;
+}
+
+void EmoteDisplay::HidePanel()
+{
+    if (!emote_handle_) {
+        return;
+    }
+    emote_lock(emote_handle_);
+    if (panel_img_) {
+        gfx_obj_set_visible((gfx_obj_t*)panel_img_, false);
+    }
+    emote_set_anim_visible(emote_handle_, true);    // trả về mặt mèo
+    emote_unlock(emote_handle_);
+    emote_notify_all_refresh(emote_handle_);
+    panel_shown_ = false;
+}
+
 void EmoteDisplay::RefreshAll()
 {
     if (emote_handle_) {
