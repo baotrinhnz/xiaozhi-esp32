@@ -257,6 +257,14 @@ bool EmoteDisplay::ShowPanelImage(const uint8_t* jpeg, size_t len)
         free(panel_rgb_);                           // giải phóng ảnh trước
     }
     panel_rgb_ = rgb;                               // nhận sở hữu buffer RGB565 (giữ sống khi engine hiện)
+    // jpeg_to_image ra RGB565 little-endian, gfx đọc byte ngược -> đảo màu (ám xanh). Hoán 2 byte/pixel.
+    {
+        uint16_t* px = reinterpret_cast<uint16_t*>(panel_rgb_);
+        size_t npx = rgb_len / 2;
+        for (size_t i = 0; i < npx; ++i) {
+            px[i] = __builtin_bswap16(px[i]);
+        }
+    }
     static gfx_image_dsc_t s_dsc;                   // 1 panel image duy nhất -> static ổn
     s_dsc.header.magic = C_ARRAY_HEADER_MAGIC;      // 0x19 — decoder nhận ảnh raw qua magic này (BẮT BUỘC)
     s_dsc.header.flags = 0;
