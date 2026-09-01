@@ -28,6 +28,7 @@
 #include "board.h"
 #include "gfx.h"
 #include "expression_emote.h"
+#include "jpeg_to_image.h"
 
 
 namespace emote {
@@ -244,8 +245,25 @@ bool EmoteDisplay::ShowPanelImage(const uint8_t* jpeg, size_t len)
     if (!emote_handle_ || !jpeg || !len) {
         return false;
     }
+    // esp_emote_gfx 3.0.5 CHƯA có nguồn JPEG -> tự decode JPEG sang RGB565 rồi feed gfx_image_dsc_t.
+    uint8_t* rgb = nullptr;
+    size_t rgb_len = 0, w = 0, h = 0, stride = 0;
+    if (jpeg_to_image(jpeg, len, &rgb, &rgb_len, &w, &h, &stride) != ESP_OK || rgb == nullptr) {
+        ESP_LOGE(TAG, "ShowPanelImage: JPEG decode failed");
+        return false;
+    }
     emote_lock(emote_handle_);
-    panel_jpeg_.assign(jpeg, jpeg + len);           // giữ JPEG sống trong khi engine decode/hiện
+    if (panel_rgb_) {
+        free(panel_rgb_);                           // giải phóng ảnh trước
+    }
+    panel_rgb_ = rgb;                               // nhận sở hữu buffer RGB565 (giữ sống khi engine hiện)
+    static gfx_image_dsc_t s_dsc;                   // 1 panel image duy nhất -> static ổn
+    s_dsc.header.cf = GFX_COLOR_FORMAT_RGB565;
+    s_dsc.header.w = (uint16_t)w;
+    s_dsc.header.h = (uint16_t)h;
+    s_dsc.header.stride = (uint16_t)stride;
+    s_dsc.data = panel_rgb_;
+    s_dsc.data_size = (uint32_t)rgb_len;
     if (panel_img_ == nullptr) {
         panel_img_ = emote_create_obj_by_type(emote_handle_, "image", "panel_img");
     }
@@ -255,17 +273,15 @@ bool EmoteDisplay::ShowPanelImage(const uint8_t* jpeg, size_t len)
         return false;
     }
     gfx_obj_t* obj = (gfx_obj_t*)panel_img_;
-    gfx_jpeg_dsc_t jd = { panel_jpeg_.data(), (uint32_t)panel_jpeg_.size() };
-    gfx_img_src_t src = { GFX_IMG_SRC_TYPE_JPEG, &jd };
-    gfx_img_set_src_desc(obj, &src);
-    gfx_obj_set_size(obj, 360, 360);
+    gfx_img_set_src(obj, &s_dsc);
+    gfx_obj_set_size(obj, (uint16_t)w, (uint16_t)h);
     gfx_obj_align(obj, GFX_ALIGN_CENTER, 0, 0);
     emote_set_anim_visible(emote_handle_, false);   // giấu mặt mèo
     gfx_obj_set_visible(obj, true);                 // hiện ảnh panel
     emote_unlock(emote_handle_);
     emote_notify_all_refresh(emote_handle_);
     panel_shown_ = true;
-    ESP_LOGI(TAG, "ShowPanelImage: %u bytes", (unsigned)len);
+    ESP_LOGI(TAG, "ShowPanelImage: %ux%u", (unsigned)w, (unsigned)h);
     return true;
 }
 

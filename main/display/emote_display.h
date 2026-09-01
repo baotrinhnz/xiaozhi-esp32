@@ -3,7 +3,6 @@
 #include "display.h"
 #include <memory>
 #include <string>
-#include <vector>
 #include <cstdint>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
@@ -45,7 +44,7 @@ private:
     emote_handle_t emote_handle_ = nullptr;
 
     void* panel_img_ = nullptr;             // gfx_obj_t* của ảnh panel (tạo 1 lần, tái dùng)
-    std::vector<uint8_t> panel_jpeg_;       // giữ JPEG sống trong khi engine dùng
+    uint8_t* panel_rgb_ = nullptr;          // buffer RGB565 đã decode (giữ sống khi engine hiện)
     bool panel_shown_ = false;
 };
 
