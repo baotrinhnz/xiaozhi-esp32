@@ -5,6 +5,7 @@
 #include "config.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
+#include "mcp_server.h"                 // đăng ký tool MCP self.screen.show_panel (brain ra lệnh hiện panel)
 #include "esp_video.h"
 #include "wifi_board.h"
 
@@ -704,20 +705,16 @@ private:
         }
     }
 
-    // Tải ảnh page thứ n từ NAS (/panel?mac=<mac mèo>&n=) -> hiện lên màn (đè mặt mèo).
-    void FetchAndShowPanel(int n) {
+    // Tải ảnh JPEG từ 1 URL -> hiện lên màn (đè mặt mèo). Trả true nếu hiện được.
+    bool FetchUrlAndShow(const char* url) {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
-        if (disp == nullptr) return;
-        uint8_t mac[6] = {0};
-        esp_read_mac(mac, ESP_MAC_WIFI_STA);
-        char url[160];
-        snprintf(url, sizeof(url), "%s/panel?mac=%02x:%02x:%02x:%02x:%02x:%02x&n=%d",
-                 PANEL_HOST, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], n);
+        if (disp == nullptr) return false;
         esp_http_client_config_t cfg = {};
         cfg.url = url;
         cfg.timeout_ms = 8000;
         esp_http_client_handle_t c = esp_http_client_init(&cfg);
-        if (c == nullptr) return;
+        if (c == nullptr) return false;
+        bool ok = false;
         uint8_t* buf = nullptr;
         do {
             if (esp_http_client_open(c, 0) != ESP_OK) break;
@@ -736,11 +733,56 @@ private:
             }
             if (off == clen && disp->ShowPanelImage(buf, clen)) {
                 panel_active_ = true;
+                ok = true;
             }
         } while (0);
         if (buf) free(buf);
         esp_http_client_close(c);
         esp_http_client_cleanup(c);
+        return ok;
+    }
+
+    // Tải ảnh page thứ n từ NAS (/panel?mac=<mac mèo>&n=) -> hiện lên màn (đường VUỐT).
+    void FetchAndShowPanel(int n) {
+        uint8_t mac[6] = {0};
+        esp_read_mac(mac, ESP_MAC_WIFI_STA);
+        char url[160];
+        snprintf(url, sizeof(url), "%s/panel?mac=%02x:%02x:%02x:%02x:%02x:%02x&n=%d",
+                 PANEL_HOST, mac[0], mac[1], mac[2], mac[3], mac[4], mac[5], n);
+        FetchUrlAndShow(url);
+    }
+
+    // Fetch+decode blocking vài giây -> KHÔNG chạy trong callback MCP (task chính); đẩy sang task riêng.
+    struct PanelFetchReq { EspVocat* self; char url[200]; };
+    static void PanelFetchTask(void* arg) {
+        auto* rq = static_cast<PanelFetchReq*>(arg);
+        rq->self->FetchUrlAndShow(rq->url);
+        free(rq);
+        vTaskDelete(nullptr);
+    }
+
+    // Đăng ký tool MCP: brain (khi user "Mèo cho xem lịch") gọi -> hiện panel của người chỉ định.
+    void InitializeTools() {
+        auto& mcp = McpServer::GetInstance();
+        mcp.AddTool(
+            "self.screen.show_panel",
+            "Hiển thị trang thông tin của một người lên màn hình. Tham số person = tên người "
+            "(vd Ja, Men), view = loại trang (calendar/weather/clock).",
+            PropertyList({
+                Property("person", kPropertyTypeString),
+                Property("view", kPropertyTypeString, std::string("calendar")),
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string person = properties["person"].value<std::string>();
+                std::string view = properties["view"].value<std::string>();
+                auto* rq = static_cast<PanelFetchReq*>(malloc(sizeof(PanelFetchReq)));
+                if (rq == nullptr) return false;
+                rq->self = this;
+                snprintf(rq->url, sizeof(rq->url), "%s/panel?person=%s&view=%s",
+                         PANEL_HOST, person.c_str(), view.c_str());
+                xTaskCreatePinnedToCore(PanelFetchTask, "panel_fetch", 4 * 1024, rq, 5, nullptr, 0);
+                return true;
+            });
     }
 
     void OnTouchStart(int x, int y) {
@@ -1160,6 +1202,7 @@ public:
 #ifdef CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
         InitializeCamera();
 #endif  // CONFIG_ESP_VIDEO_ENABLE_USB_UVC_VIDEO_DEVICE
+        InitializeTools();              // tool MCP self.screen.show_panel (brain điều khiển màn)
     }
 
     virtual AudioCodec* GetAudioCodec() override {
