@@ -886,10 +886,6 @@ if(CONFIG_IDF_TARGET_ESP32S3 OR CONFIG_IDF_TARGET_ESP32P4 OR CONFIG_IDF_TARGET_E
     list(APPEND SOURCES "audio/engines/afe_audio_engine.cc")
     list(APPEND SOURCES "audio/wake_words/custom_wake_word.cc")
     list(APPEND SOURCES "audio/wake_words/wake_word_audio_cache.cc")
-    # VoCat: microWakeWord (on-device TFLite wake word). Chỉ compile khi bật cờ.
-    if(CONFIG_USE_MICRO_WAKE_WORD)
-        list(APPEND SOURCES "audio/wake_words/micro_wake_word.cc")
-    endif()
 else()
     list(APPEND SOURCES "audio/engines/lite_audio_engine.cc")
     list(APPEND SOURCES "audio/wake_words/esp_wake_word.cc")
@@ -1064,13 +1060,8 @@ if(CONFIG_BOARD_TYPE_ESP32_P4_FUNCTION_EV_BOARD)
         sdmmc
     )
 endif()
-# VoCat: nhúng model microWakeWord vào app binary (sinh symbol _binary_meo_meo_tflite_start).
-set(MWW_EMBED_FILES "")
-if(CONFIG_USE_MICRO_WAKE_WORD)
-    list(APPEND MWW_EMBED_FILES "${CMAKE_CURRENT_SOURCE_DIR}/audio/wake_words/models/meo_meo.tflite")
-endif()
 idf_component_register(SRCS ${SOURCES}
-                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS} ${MWW_EMBED_FILES}
+                    EMBED_FILES ${LANG_SOUNDS} ${COMMON_SOUNDS}
                     INCLUDE_DIRS ${INCLUDE_DIRS}
                     WHOLE_ARCHIVE
                     PRIV_REQUIRES
@@ -1096,7 +1087,6 @@ idf_component_register(SRCS ${SOURCES}
                         bt
                         fatfs
                         xiaozhi-fonts
-                        esp_http_client
                         ${MAIN_PRIV_REQUIRES_EXTRA}
                     )
 
@@ -1168,14 +1158,13 @@ if(CONFIG_BOARD_TYPE_ESP_VOCAT)
         file(COPY "${EMOTE_ASSETS_PATH}/360_360/layout.json" DESTINATION "${ESP_VOCAT_ASSETS_STAGING}/360_360")
         file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/assets/360_360/emote.json"
              DESTINATION "${ESP_VOCAT_ASSETS_STAGING}/360_360")
-        file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/emoji/low_battery.eaf"
+        # Copy TOÀN BỘ .eaf trong board emoji/ (battery + emote tuỳ biến) -> thêm .eaf mới khỏi sửa CMake
+        file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/emoji/"
              DESTINATION "${ESP_VOCAT_ASSETS_STAGING}/emoji_large")
-        file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/emoji/battery_connected.eaf"
-             DESTINATION "${ESP_VOCAT_ASSETS_STAGING}/emoji_large")
+        file(GLOB _vocat_custom_eafs "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/emoji/*.eaf")
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
             "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/assets/360_360/emote.json"
-            "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/emoji/low_battery.eaf"
-            "${CMAKE_CURRENT_SOURCE_DIR}/boards/espressif/esp-vocat/emoji/battery_connected.eaf"
+            ${_vocat_custom_eafs}
         )
     else()
         message(WARNING "esp_emote_assets component not found; ESP-VoCat custom emotes will be skipped")
