@@ -619,17 +619,8 @@ private:
                     if (shake_score > kShakeDeltaThreshold &&
                         (now_ms - last_shake_ms) > kShakeCooldownMs) {
                         last_shake_ms = now_ms;
-                        // TEST: mỗi lần lắc = emote KẾ TIẾP (lắc 22 lần xem hết bộ để đánh giá).
-                        static const char* kTestEmotes[] = {
-                            "angry", "asleep", "badminton", "confident", "cry", "investigate",
-                            "laugh", "mock", "music", "mute", "panic", "ponder", "question",
-                            "sad", "shocked", "shy", "sigh", "smile", "smile_static",
-                            "snigger", "yawn", "yummy"};
-                        static int kTestIdx = 0;
-                        const char* em = kTestEmotes[kTestIdx % 22];
-                        kTestIdx++;
-                        ESP_LOGI("VOCAT_EMOTE", "shake #%d -> %s", kTestIdx, em);
-                        self->ShowTemporaryEmotion(em, 4500);
+                        // Lắc -> "panic" (hoảng hốt, bản vector nét) 2.5s rồi về neutral.
+                        self->ShowTemporaryEmotion("panic", 2500);
                     }
                 }
                 prev = cur;
