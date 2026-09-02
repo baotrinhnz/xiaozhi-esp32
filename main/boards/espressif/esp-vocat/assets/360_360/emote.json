@@ -3,241 +3,247 @@
         "emote": "angry",
         "src": "angry.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "asleep",
         "src": "asleep.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "badminton",
         "src": "badminton.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "confident",
         "src": "confident.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "cry",
         "src": "cry.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "investigate",
         "src": "investigate.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "laugh",
         "src": "laugh.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
+    },
+    {
+        "emote": "leisure",
+        "src": "leisure.eaf",
+        "loop": true,
+        "fps": 25
     },
     {
         "emote": "mock",
         "src": "mock.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "music",
         "src": "music.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "mute",
         "src": "mute.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "panic",
         "src": "panic.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "ponder",
         "src": "ponder.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "question",
         "src": "question.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "sad",
         "src": "sad.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "shocked",
         "src": "shocked.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "shy",
         "src": "shy.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "sigh",
         "src": "sigh.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "smile",
         "src": "smile.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "smile_static",
         "src": "smile_static.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "snigger",
         "src": "snigger.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "yawn",
         "src": "yawn.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "yummy",
         "src": "yummy.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "happy",
         "src": "smile.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "laughing",
         "src": "laugh.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "funny",
         "src": "snigger.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "loving",
         "src": "smile.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "embarrassed",
         "src": "shy.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "delicious",
         "src": "yummy.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "crying",
         "src": "cry.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "sleepy",
         "src": "asleep.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "silly",
         "src": "snigger.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "surprised",
         "src": "shocked.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "thinking",
         "src": "ponder.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "relaxed",
-        "src": "smile.eaf",
+        "src": "leisure.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "confused",
         "src": "question.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "cool",
         "src": "confident.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "kissy",
         "src": "yummy.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "winking",
         "src": "winking.eaf",
         "loop": true,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "neutral",
         "src": "neutral.eaf",
         "loop": false,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "idle",
         "src": "neutral.eaf",
         "loop": false,
-        "fps": 20
+        "fps": 25
     },
     {
         "emote": "low_battery",
