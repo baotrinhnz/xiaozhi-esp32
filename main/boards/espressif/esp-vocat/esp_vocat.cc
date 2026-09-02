@@ -619,8 +619,8 @@ private:
                     if (shake_score > kShakeDeltaThreshold &&
                         (now_ms - last_shake_ms) > kShakeCooldownMs) {
                         last_shake_ms = now_ms;
-                        // TEST emote custom: lắc -> "laugh" (laugh.eaf) để verify .eaf chạy đúng.
-                        self->ShowTemporaryEmotion("laugh", 2500);
+                        // TEST emote custom 360: lắc -> "panic" (panic.eaf, EAF5) verify size+format.
+                        self->ShowTemporaryEmotion("panic", 2500);
                     }
                 }
                 prev = cur;
