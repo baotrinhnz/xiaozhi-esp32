@@ -619,9 +619,8 @@ private:
                     if (shake_score > kShakeDeltaThreshold &&
                         (now_ms - last_shake_ms) > kShakeCooldownMs) {
                         last_shake_ms = now_ms;
-                        // "dizzy/nauseated" are not guaranteed in current assets, use supported
-                        // fallback.
-                        self->ShowTemporaryEmotion("confused", 1800);
+                        // TEST emote custom: lắc -> "laugh" (laugh.eaf) để verify .eaf chạy đúng.
+                        self->ShowTemporaryEmotion("laugh", 2500);
                     }
                 }
                 prev = cur;
