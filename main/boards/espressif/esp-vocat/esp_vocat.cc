@@ -498,6 +498,7 @@ private:
     static constexpr int VIZ_W = 200, VIZ_H = 46, VIZ_N = 16;
     uint16_t* viz_buf_ = nullptr;
     float viz_bars_[VIZ_N] = {0};
+    float viz_peak_[VIZ_N] = {0};           // "chấm đỉnh" giữ đỉnh rồi rơi từ từ (hiệu ứng peak-hold)
     volatile bool viz_run_ = false;         // task viz chạy hay nghỉ
     TaskHandle_t viz_task_ = nullptr;
     uint8_t low_battery_alert_mask_ = 0;
@@ -891,12 +892,19 @@ private:
                 viz_bars_[b] -= 0.05f;                            // rơi từ từ
                 if (viz_bars_[b] < 0) viz_bars_[b] = 0;
             }
+            if (viz_bars_[b] > viz_peak_[b]) {
+                viz_peak_[b] = viz_bars_[b];                      // chấm đỉnh nhảy lên theo cột
+            } else {
+                viz_peak_[b] -= 0.018f;                           // rồi rơi CHẬM hơn cột -> tách ra "tung lên rớt xuống"
+                if (viz_peak_[b] < viz_bars_[b]) viz_peak_[b] = viz_bars_[b];
+            }
         }
         for (int i = 0; i < VIZ_W * VIZ_H; i++) viz_buf_[i] = 0;  // nền đen
         int bw = VIZ_W / VIZ_N;
         int bar_w = bw - 3;                                       // hở khe giữa cột
+        const uint16_t DOT = __builtin_bswap16(VizRgb565(0xFF, 0xFF, 0xFF));   // chấm đỉnh trắng nổi bật
         for (int b = 0; b < VIZ_N; b++) {
-            int hh = (int)(viz_bars_[b] * (VIZ_H - 2));
+            int hh = (int)(viz_bars_[b] * (VIZ_H - 4));
             if (hh < 1 && viz_bars_[b] > 0.02f) hh = 1;
             int x0 = b * bw + 1;
             for (int y = VIZ_H - hh; y < VIZ_H; y++) {
@@ -905,6 +913,16 @@ private:
                     (uint8_t)(0x40 + 0x70 * t), (uint8_t)(0xC0 + 0x30 * t), (uint8_t)(0xB0 + 0x40 * t)));
                 uint16_t* row = viz_buf_ + y * VIZ_W + x0;
                 for (int x = 0; x < bar_w; x++) row[x] = c;
+            }
+            // chấm đỉnh: 2px, cách cột 1 khoảng khi cột rơi (peak-hold)
+            int py = VIZ_H - 1 - (int)(viz_peak_[b] * (VIZ_H - 4));
+            if (viz_peak_[b] > 0.02f) {
+                for (int dy = 0; dy < 2; dy++) {
+                    int yy = py + dy;
+                    if (yy < 0 || yy >= VIZ_H) continue;
+                    uint16_t* row = viz_buf_ + yy * VIZ_W + x0;
+                    for (int x = 0; x < bar_w; x++) row[x] = DOT;
+                }
             }
         }
         disp->ShowViz(viz_buf_, VIZ_W, VIZ_H, 138);              // khu đáy (vùng tối của nền)
@@ -923,7 +941,7 @@ private:
             if (viz_buf_ == nullptr) viz_buf_ = (uint16_t*)malloc(VIZ_W * VIZ_H * 2);
         }
         if (viz_buf_ == nullptr) return;
-        for (int b = 0; b < VIZ_N; b++) viz_bars_[b] = 0;
+        for (int b = 0; b < VIZ_N; b++) { viz_bars_[b] = 0; viz_peak_[b] = 0; }
         viz_run_ = true;
         if (viz_task_ == nullptr) {
             xTaskCreatePinnedToCore(VizTaskLoop, "media_viz", 3 * 1024, this, 3, &viz_task_, 0);
