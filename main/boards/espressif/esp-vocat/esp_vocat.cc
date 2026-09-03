@@ -479,7 +479,10 @@ private:
     int touch_sx_ = 0, touch_sy_ = 0, touch_lx_ = 0, touch_ly_ = 0;
     // Màn media native (tên cuộn + giờ tick trên máy) — thay panel-ảnh cho audiobook, khỏi refresh ảnh.
     gfx_obj_t* media_title_ = nullptr;
+    gfx_obj_t* media_author_ = nullptr;    // 2b: tác giả/ca sĩ
     gfx_obj_t* media_time_ = nullptr;
+    gfx_obj_t* media_bar_bg_ = nullptr;    // 2b: thanh progress (nền)
+    gfx_obj_t* media_bar_fg_ = nullptr;    // 2b: thanh progress (phần đã phát)
     esp_timer_handle_t media_timer_ = nullptr;
     int media_pos0_ = 0;                // vị trí (giây) lúc bắt đầu hiện
     int media_dur_ = 0;                 // tổng thời lượng (giây)
@@ -788,46 +791,84 @@ private:
         else snprintf(buf, n, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
     }
 
+    static constexpr int kBarW = 264;      // bề rộng thanh progress
     void UpdateMediaTimeLabel() {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
-        if (disp == nullptr || media_time_ == nullptr || !media_active_) return;
+        if (disp == nullptr || !media_active_) return;
         int pos = media_pos0_ + (int)((esp_timer_get_time() - media_t0_us_) / 1000000);
         if (media_dur_ > 0 && pos > media_dur_) pos = media_dur_;
         char a[16], b[16], line[40];
         FmtTime(a, sizeof(a), pos);
         FmtTime(b, sizeof(b), media_dur_);
         snprintf(line, sizeof(line), "%s / %s", a, b);
+        int fw = (media_dur_ > 0) ? (int)((int64_t)kBarW * pos / media_dur_) : 0;
+        if (fw < 2) fw = 2;
+        if (fw > kBarW) fw = kBarW;
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
-        gfx_label_set_text(media_time_, line);
+        if (media_time_ != nullptr) gfx_label_set_text(media_time_, line);
+        if (media_bar_fg_ != nullptr) gfx_obj_set_size(media_bar_fg_, fw, 8);   // phần đã phát
         emote_unlock(h);
         emote_notify_all_refresh(h);
     }
 
     static void MediaTickCb(void* arg) { static_cast<EspVocat*>(arg)->UpdateMediaTimeLabel(); }
 
-    void ShowMedia(const char* title, int pos, int dur) {
+    void ShowMedia(const char* title, const char* author, int pos, int dur) {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr) return;
         emote_handle_t h = disp->GetEmoteHandle();
         if (h == nullptr) return;
+        const int bx = (360 - kBarW) / 2;                          // căn giữa thanh
+        const int bar_y = 214;
         emote_lock(h);
+        // Tên sách/bài (cuộn native)
         if (media_title_ == nullptr) media_title_ = emote_create_obj_by_type(h, "label", "media_title");
         if (media_title_ != nullptr) {
             gfx_label_set_font(media_title_, (void*)&vocat_vn_26);
             gfx_label_set_color(media_title_, GFX_COLOR_HEX(0xF5F5F5));
             gfx_obj_set_size(media_title_, 300, 40);
-            gfx_label_set_scroll_speed(media_title_, 50);          // chậm (ms/pixel) — đặt TRƯỚC long_mode
-            gfx_label_set_text(media_title_, title ? title : ""); // set_text TRƯỚC (như test mẫu chính chủ)
-            gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);  // long_mode SAU -> tạo timer scroll đúng
-            gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, -10);
+            gfx_label_set_scroll_speed(media_title_, 50);
+            gfx_label_set_text(media_title_, title ? title : "");
+            gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);
+            gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, -46);
             gfx_obj_set_visible(media_title_, true);
         }
+        // Tác giả / ca sĩ
+        if (media_author_ == nullptr) media_author_ = emote_create_obj_by_type(h, "label", "media_author");
+        if (media_author_ != nullptr) {
+            bool has = (author != nullptr && author[0] != '\0');
+            gfx_label_set_font(media_author_, (void*)&vocat_vn_26);
+            gfx_label_set_color(media_author_, GFX_COLOR_HEX(0x9FC8C0));
+            gfx_label_set_text(media_author_, has ? author : " ");
+            gfx_obj_align(media_author_, GFX_ALIGN_CENTER, 0, -8);
+            gfx_obj_set_visible(media_author_, has);
+        }
+        // Thanh progress: nền (track) + phần đã phát — dùng label BẬT NỀN làm hình chữ nhật
+        if (media_bar_bg_ == nullptr) media_bar_bg_ = emote_create_obj_by_type(h, "label", "media_bar_bg");
+        if (media_bar_bg_ != nullptr) {
+            gfx_label_set_text(media_bar_bg_, " ");
+            gfx_label_set_bg_enable(media_bar_bg_, true);
+            gfx_label_set_bg_color(media_bar_bg_, GFX_COLOR_HEX(0x2A4A3C));
+            gfx_obj_set_size(media_bar_bg_, kBarW, 8);
+            gfx_obj_set_pos(media_bar_bg_, bx, bar_y);
+            gfx_obj_set_visible(media_bar_bg_, true);
+        }
+        if (media_bar_fg_ == nullptr) media_bar_fg_ = emote_create_obj_by_type(h, "label", "media_bar_fg");
+        if (media_bar_fg_ != nullptr) {
+            gfx_label_set_text(media_bar_fg_, " ");
+            gfx_label_set_bg_enable(media_bar_fg_, true);
+            gfx_label_set_bg_color(media_bar_fg_, GFX_COLOR_HEX(0x7FD1C4));
+            gfx_obj_set_size(media_bar_fg_, 2, 8);
+            gfx_obj_set_pos(media_bar_fg_, bx, bar_y);
+            gfx_obj_set_visible(media_bar_fg_, true);
+        }
+        // Giờ
         if (media_time_ == nullptr) media_time_ = emote_create_obj_by_type(h, "label", "media_time");
         if (media_time_ != nullptr) {
             gfx_label_set_font(media_time_, (void*)&vocat_vn_26);
             gfx_label_set_color(media_time_, GFX_COLOR_HEX(0x9FC8C0));
-            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, 90);
+            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, 66);
             gfx_obj_set_visible(media_time_, true);
         }
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
@@ -853,7 +894,10 @@ private:
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
         if (media_title_ != nullptr) gfx_obj_set_visible(media_title_, false);
+        if (media_author_ != nullptr) gfx_obj_set_visible(media_author_, false);
         if (media_time_ != nullptr) gfx_obj_set_visible(media_time_, false);
+        if (media_bar_bg_ != nullptr) gfx_obj_set_visible(media_bar_bg_, false);
+        if (media_bar_fg_ != nullptr) gfx_obj_set_visible(media_bar_fg_, false);
         emote_set_anim_visible(h, true);                           // trả mặt mèo
         emote_unlock(h);
         emote_notify_all_refresh(h);
@@ -901,14 +945,16 @@ private:
             "Gọi 1 lần khi bắt đầu phát nhạc/sách nói. title=tên, pos=số giây đã phát, dur=tổng số giây.",
             PropertyList({
                 Property("title", kPropertyTypeString, std::string("")),
+                Property("author", kPropertyTypeString, std::string("")),
                 Property("pos", kPropertyTypeInteger, 0),
                 Property("dur", kPropertyTypeInteger, 0),
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 std::string title = properties["title"].value<std::string>();
+                std::string author = properties["author"].value<std::string>();
                 int pos = properties["pos"].value<int>();
                 int dur = properties["dur"].value<int>();
-                ShowMedia(title.c_str(), pos, dur);
+                ShowMedia(title.c_str(), author.c_str(), pos, dur);
                 return true;
             });
     }
