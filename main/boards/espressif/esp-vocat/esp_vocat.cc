@@ -817,9 +817,9 @@ private:
             gfx_label_set_font(media_title_, (void*)&vocat_vn_26);
             gfx_label_set_color(media_title_, GFX_COLOR_HEX(0xF5F5F5));
             gfx_obj_set_size(media_title_, 300, 40);
-            gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);
-            gfx_label_set_scroll_speed(media_title_, 50);          // chậm
-            gfx_label_set_text(media_title_, title ? title : "");
+            gfx_label_set_scroll_speed(media_title_, 50);          // chậm (ms/pixel) — đặt TRƯỚC long_mode
+            gfx_label_set_text(media_title_, title ? title : ""); // set_text TRƯỚC (như test mẫu chính chủ)
+            gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);  // long_mode SAU -> tạo timer scroll đúng
             gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, -10);
             gfx_obj_set_visible(media_title_, true);
         }
