@@ -791,6 +791,18 @@ private:
                 xTaskCreatePinnedToCore(PanelFetchTask, "panel_fetch", 4 * 1024, rq, 5, nullptr, 0);
                 return true;
             });
+        // Đóng panel -> trả màn về mặt mèo. Brain gọi khi DỪNG phát nhạc/sách (server show_panel không tự tắt).
+        mcp.AddTool(
+            "self.screen.hide_panel",
+            "Đóng panel đang hiện trên màn hình, trả về mặt mèo. Gọi khi dừng phát nhạc/sách "
+            "hoặc khi không cần hiển thị panel nữa.",
+            PropertyList(),
+            [this](const PropertyList&) -> ReturnValue {
+                auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+                if (disp != nullptr) disp->HidePanel();
+                panel_active_ = false;
+                return true;
+            });
     }
 
     void OnTouchStart(int x, int y) {
