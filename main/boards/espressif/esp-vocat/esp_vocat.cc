@@ -835,9 +835,20 @@ private:
         FmtTime(a, sizeof(a), pos);
         FmtTime(b, sizeof(b), media_dur_);
         snprintf(line, sizeof(line), "%s / %s", a, b);       // "đã nghe / tổng" = tiến độ dạng số
+        // Thanh progress 10 ô: █ đã phát, ░ còn lại (UTF-8: █=E2 96 88, ░=E2 96 91)
+        const int CELLS = 10;
+        int filled = (media_dur_ > 0) ? (int)(((int64_t)CELLS * pos + media_dur_ / 2) / media_dur_) : 0;
+        if (filled < 0) filled = 0; if (filled > CELLS) filled = CELLS;
+        char bar[CELLS * 3 + 1]; int bp = 0;
+        for (int i = 0; i < CELLS; i++) {
+            const char* g = (i < filled) ? "\xE2\x96\x88" : "\xE2\x96\x91";
+            bar[bp++] = g[0]; bar[bp++] = g[1]; bar[bp++] = g[2];
+        }
+        bar[bp] = 0;
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
         if (media_time_ != nullptr) gfx_label_set_text(media_time_, line);
+        if (media_bar_fg_ != nullptr) gfx_label_set_text(media_bar_fg_, bar);
         emote_unlock(h);
         emote_notify_all_refresh(h);
     }
@@ -852,8 +863,9 @@ private:
         bool has_cover = (cover_url != nullptr && cover_url[0] != '\0');
         (void)author; (void)dur;   // tác giả + dur chưa dùng trực tiếp ở đây (dur qua media_dur_)
         // Bìa dim+gradient phủ FULL màn -> chữ đặt ở KHU ĐÁY (vùng tối). Không bìa -> chữ căn giữa trên nền đen.
-        const int title_ofs = has_cover ? 66 : -24;    // GFX_ALIGN_CENTER y offset (center=180)
-        const int time_ofs  = has_cover ? 116 : 26;
+        const int title_ofs = has_cover ? 58 : -34;    // GFX_ALIGN_CENTER y offset (center=180)
+        const int time_ofs  = has_cover ? 96 : 6;
+        const int prog_ofs  = has_cover ? 132 : 44;    // thanh progress (label ký tự ▓░) dưới dòng giờ
         // Tạo obj ảnh nền TRƯỚC MỌI label (kể cả khi chưa có bìa) -> nền luôn nằm DƯỚI chữ (z-order theo thứ tự tạo).
         disp->CreateMediaCoverObj();
         if (!has_cover) disp->HideMediaCover();                     // không bìa -> ẩn nền cũ (nếu còn); tự khoá, NGOÀI lock
@@ -880,6 +892,17 @@ private:
             gfx_label_set_text_align(media_time_, GFX_TEXT_ALIGN_CENTER);
             gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, time_ofs);
             gfx_obj_set_visible(media_time_, true);
+        }
+        // Thanh progress = 1 label PLAIN vẽ bằng ký tự khối (█ đã phát / ░ còn lại). KHÔNG bg-enable nên không nuốt label khác.
+        if (media_bar_fg_ == nullptr) media_bar_fg_ = emote_create_obj_by_type(h, "label", "media_prog");
+        if (media_bar_fg_ != nullptr) {
+            gfx_label_set_font(media_bar_fg_, (void*)&vocat_vn_26);
+            gfx_label_set_color(media_bar_fg_, GFX_COLOR_HEX(0x7FD1C4));
+            gfx_obj_set_size(media_bar_fg_, 300, 40);
+            gfx_label_set_text(media_bar_fg_, "\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91");
+            gfx_label_set_text_align(media_bar_fg_, GFX_TEXT_ALIGN_CENTER);
+            gfx_obj_align(media_bar_fg_, GFX_ALIGN_CENTER, 0, prog_ofs);
+            gfx_obj_set_visible(media_bar_fg_, true);
         }
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
         emote_unlock(h);
@@ -916,6 +939,7 @@ private:
         emote_lock(h);
         if (media_title_ != nullptr) gfx_obj_set_visible(media_title_, false);
         if (media_time_ != nullptr) gfx_obj_set_visible(media_time_, false);
+        if (media_bar_fg_ != nullptr) gfx_obj_set_visible(media_bar_fg_, false);   // thanh progress
         emote_set_anim_visible(h, true);                           // trả mặt mèo
         emote_unlock(h);
         disp->HideMediaCover();                                    // ẩn ảnh nền media (tự khoá, gọi NGOÀI lock)
