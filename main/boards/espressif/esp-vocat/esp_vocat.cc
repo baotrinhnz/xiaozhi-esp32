@@ -46,6 +46,7 @@ extern "C" {
 #include <freertos/task.h>
 #include "driver/temperature_sensor.h"
 #include <math.h>
+#include <cstring>
 #include "esp_heap_caps.h"
 #include "esp_random.h"
 
@@ -494,6 +495,7 @@ private:
     int64_t media_t0_us_ = 0;           // mốc thời gian bắt đầu hiện
     bool media_active_ = false;
     bool media_bar_on_ = true;          // có vẽ thanh progress không (sách=có, nhạc=không)
+    char media_artist_[64] = {0};       // ca sĩ (nhạc) -> hiện ở dòng "time": "ca sĩ · m:ss"
     // Visualizer nhạc (tự vẽ cột vào ảnh RGB565, refresh ~15fps theo mức âm)
     static constexpr int VIZ_W = 200, VIZ_H = 46, VIZ_N = 16;
     uint16_t* viz_buf_ = nullptr;
@@ -845,10 +847,14 @@ private:
         if (disp == nullptr || !media_active_) return;
         int pos = media_pos0_ + (int)((esp_timer_get_time() - media_t0_us_) / 1000000);
         if (media_dur_ > 0 && pos > media_dur_) pos = media_dur_;
-        char a[16], b[16], line[40];
+        char a[16], b[16], line[96];
         FmtTime(a, sizeof(a), pos);
         FmtTime(b, sizeof(b), media_dur_);
-        snprintf(line, sizeof(line), "%s / %s", a, b);       // "đã nghe / tổng" = tiến độ dạng số
+        if (!media_bar_on_ && media_artist_[0]) {            // NHẠC: "ca sĩ · đã nghe" (hiện tên ca sĩ trên màn)
+            snprintf(line, sizeof(line), "%s \xC2\xB7 %s", media_artist_, a);   // \xC2\xB7 = ' · '
+        } else {
+            snprintf(line, sizeof(line), "%s / %s", a, b);   // SÁCH: "đã nghe / tổng"
+        }
         // Thanh progress MỊN: mỗi ô 2 mức nhờ khối NỬA ▌ -> 2*CELLS mức (mịn gấp đôi 10 ô đặc).
         // UTF-8: █=E2 96 88 (đầy), ▌=E2 96 8C (nửa trái), ░=E2 96 91 (rỗng).
         const int CELLS = 12;
@@ -914,10 +920,10 @@ private:
                 uint16_t* row = viz_buf_ + y * VIZ_W + x0;
                 for (int x = 0; x < bar_w; x++) row[x] = c;
             }
-            // chấm đỉnh: 2px, cách cột 1 khoảng khi cột rơi (peak-hold)
-            int py = VIZ_H - 1 - (int)(viz_peak_[b] * (VIZ_H - 4));
+            // chấm đỉnh 3px (trắng): giữ đỉnh rồi rơi CHẬM hơn cột -> tách ra khi cột tụt (tung lên rớt xuống)
+            int py = VIZ_H - 2 - (int)(viz_peak_[b] * (VIZ_H - 4));
             if (viz_peak_[b] > 0.02f) {
-                for (int dy = 0; dy < 2; dy++) {
+                for (int dy = 0; dy < 3; dy++) {
                     int yy = py + dy;
                     if (yy < 0 || yy >= VIZ_H) continue;
                     uint16_t* row = viz_buf_ + yy * VIZ_W + x0;
@@ -927,11 +933,20 @@ private:
         }
         disp->ShowViz(viz_buf_, VIZ_W, VIZ_H, 138);              // khu đáy (vùng tối của nền)
     }
-    // Task riêng (KHÔNG chạy vẽ nặng trong esp_timer callback kẻo nghẽn timer/watchdog). Task sống bền, nghỉ khi viz_run_=false.
+    // Task riêng (KHÔNG chạy vẽ nặng trong esp_timer callback). CHÍNH task tự ẩn viz khi viz_run_=false ->
+    // tránh race "ẩn chéo luồng" làm frame dở ShowViz lại đè -> viz kẹt sau khi ngừng nhạc.
     static void VizTaskLoop(void* arg) {
         auto* self = static_cast<EspVocat*>(arg);
+        bool shown = false;
         while (true) {
-            if (self->viz_run_ && self->media_active_) self->VizTick();
+            if (self->viz_run_ && self->media_active_) {
+                self->VizTick();
+                shown = true;
+            } else if (shown) {
+                auto* d = dynamic_cast<emote::EmoteDisplay*>(self->display_);
+                if (d != nullptr) d->HideViz();
+                shown = false;
+            }
             vTaskDelay(pdMS_TO_TICKS(66));                        // ~15 fps
         }
     }
@@ -947,11 +962,7 @@ private:
             xTaskCreatePinnedToCore(VizTaskLoop, "media_viz", 3 * 1024, this, 3, &viz_task_, 0);
         }
     }
-    void StopViz() {
-        viz_run_ = false;
-        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
-        if (disp != nullptr) disp->HideViz();
-    }
+    void StopViz() { viz_run_ = false; }   // chính task VizTaskLoop sẽ HideViz ở tick kế (không ẩn chéo luồng)
 
     void ShowMedia(const char* title, const char* author, int pos, int dur, const char* cover_url, bool show_bar) {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
@@ -959,7 +970,9 @@ private:
         emote_handle_t h = disp->GetEmoteHandle();
         if (h == nullptr) return;
         bool has_cover = (cover_url != nullptr && cover_url[0] != '\0');
-        (void)author; (void)dur;   // tác giả + dur chưa dùng trực tiếp ở đây (dur qua media_dur_)
+        (void)dur;                                             // dur qua media_dur_
+        strncpy(media_artist_, author ? author : "", sizeof(media_artist_) - 1);   // ca sĩ -> hiện ở dòng time (nhạc)
+        media_artist_[sizeof(media_artist_) - 1] = '\0';
         // Bìa dim+gradient phủ FULL màn -> chữ đặt ở KHU ĐÁY (vùng tối). Không bìa -> chữ căn giữa trên nền đen.
         const int title_ofs = has_cover ? 58 : -34;    // GFX_ALIGN_CENTER y offset (center=180)
         const int time_ofs  = has_cover ? 96 : 6;
