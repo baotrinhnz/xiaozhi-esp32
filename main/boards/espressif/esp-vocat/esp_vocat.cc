@@ -826,7 +826,6 @@ private:
         else snprintf(buf, n, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
     }
 
-    static constexpr int kBarW = 264;      // bề rộng thanh progress
     void UpdateMediaTimeLabel() {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr || !media_active_) return;
@@ -835,14 +834,10 @@ private:
         char a[16], b[16], line[40];
         FmtTime(a, sizeof(a), pos);
         FmtTime(b, sizeof(b), media_dur_);
-        snprintf(line, sizeof(line), "%s / %s", a, b);
-        int fw = (media_dur_ > 0) ? (int)((int64_t)kBarW * pos / media_dur_) : 0;
-        if (fw < 2) fw = 2;
-        if (fw > kBarW) fw = kBarW;
+        snprintf(line, sizeof(line), "%s / %s", a, b);       // "đã nghe / tổng" = tiến độ dạng số
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
         if (media_time_ != nullptr) gfx_label_set_text(media_time_, line);
-        if (media_bar_fg_ != nullptr) gfx_obj_set_size(media_bar_fg_, fw, 8);   // phần đã phát
         emote_unlock(h);
         emote_notify_all_refresh(h);
     }
@@ -855,20 +850,19 @@ private:
         emote_handle_t h = disp->GetEmoteHandle();
         if (h == nullptr) return;
         bool has_cover = (cover_url != nullptr && cover_url[0] != '\0');
-        (void)author;   // BỎ dòng tác giả (xem chú thích dưới) — giữ tham số cho tương thích tool
-        // Có bìa: bìa nhỏ (84x108) nằm DƯỚI dòng subtitle của engine (y88..196) -> khối chữ nằm dưới bìa.
-        // BỎ dòng tác giả: engine gfx chỉ dựng được ~4 label; thêm author thì label "time" (thứ 5) KHÔNG tạo được -> mất giờ.
-        const int title_ofs = has_cover ? 40 : -40;    // GFX_ALIGN_CENTER y offset (center=180)
-        const int bar_y = has_cover ? 254 : 214;       // toạ độ tuyệt đối
-        const int time_ofs = has_cover ? 98 : 76;
-        const int bx = (360 - kBarW) / 2;                          // căn giữa thanh
-        if (!has_cover) disp->HideMediaCover();                     // bài không bìa -> ẩn bìa cũ (tự khoá, gọi NGOÀI lock)
+        (void)author; (void)dur;   // tác giả + dur chưa dùng trực tiếp ở đây (dur qua media_dur_)
+        // Bìa dim+gradient phủ FULL màn -> chữ đặt ở KHU ĐÁY (vùng tối). Không bìa -> chữ căn giữa trên nền đen.
+        const int title_ofs = has_cover ? 66 : -24;    // GFX_ALIGN_CENTER y offset (center=180)
+        const int time_ofs  = has_cover ? 116 : 26;
+        // Tạo obj ảnh nền TRƯỚC MỌI label (kể cả khi chưa có bìa) -> nền luôn nằm DƯỚI chữ (z-order theo thứ tự tạo).
+        disp->CreateMediaCoverObj();
+        if (!has_cover) disp->HideMediaCover();                     // không bìa -> ẩn nền cũ (nếu còn); tự khoá, NGOÀI lock
         emote_lock(h);
-        // Tên sách/bài (cuộn native)
+        // Tên sách/bài (cuộn native) — chữ trắng nổi trên nền tối
         if (media_title_ == nullptr) media_title_ = emote_create_obj_by_type(h, "label", "media_title");
         if (media_title_ != nullptr) {
             gfx_label_set_font(media_title_, (void*)&vocat_vn_26);
-            gfx_label_set_color(media_title_, GFX_COLOR_HEX(0xF5F5F5));
+            gfx_label_set_color(media_title_, GFX_COLOR_HEX(0xFFFFFF));
             gfx_obj_set_size(media_title_, 300, 40);
             gfx_label_set_scroll_speed(media_title_, 50);
             gfx_label_set_text(media_title_, title ? title : "");
@@ -876,49 +870,21 @@ private:
             gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, title_ofs);
             gfx_obj_set_visible(media_title_, true);
         }
-        // Thanh progress: nền (track) + phần đã phát — dùng label BẬT NỀN làm hình chữ nhật
-        if (media_bar_bg_ == nullptr) media_bar_bg_ = emote_create_obj_by_type(h, "label", "media_bar_bg");
-        if (media_bar_bg_ != nullptr) {
-            gfx_label_set_text(media_bar_bg_, " ");
-            gfx_label_set_bg_enable(media_bar_bg_, true);
-            gfx_label_set_bg_color(media_bar_bg_, GFX_COLOR_HEX(0x2A4A3C));
-            gfx_obj_set_size(media_bar_bg_, kBarW, 8);
-            gfx_obj_set_pos(media_bar_bg_, bx, bar_y);
-            gfx_obj_set_visible(media_bar_bg_, true);
-        }
-        if (media_bar_fg_ == nullptr) media_bar_fg_ = emote_create_obj_by_type(h, "label", "media_bar_fg");
-        if (media_bar_fg_ != nullptr) {
-            gfx_label_set_text(media_bar_fg_, " ");
-            gfx_label_set_bg_enable(media_bar_fg_, true);
-            gfx_label_set_bg_color(media_bar_fg_, GFX_COLOR_HEX(0x7FD1C4));
-            gfx_obj_set_size(media_bar_fg_, 2, 8);
-            gfx_obj_set_pos(media_bar_fg_, bx, bar_y);
-            gfx_obj_set_visible(media_bar_fg_, true);
-        }
-        // Giờ (set size + text + căn giữa rõ ràng để chắc hiện)
+        // Giờ "đã nghe / tổng" — CÔNG THỨC TỐI GIẢN như 2a (không set_size/text_align) để CHẮC hiện; text set ở UpdateMediaTimeLabel
         if (media_time_ == nullptr) media_time_ = emote_create_obj_by_type(h, "label", "media_time");
         if (media_time_ != nullptr) {
-            char a0[16], b0[16], line0[40];
-            FmtTime(a0, sizeof(a0), pos);
-            FmtTime(b0, sizeof(b0), dur);
-            snprintf(line0, sizeof(line0), "%s / %s", a0, b0);
             gfx_label_set_font(media_time_, (void*)&vocat_vn_26);
-            gfx_label_set_color(media_time_, GFX_COLOR_HEX(0x9FC8C0));
-            gfx_obj_set_size(media_time_, 240, 34);
-            gfx_label_set_text(media_time_, line0);
-            gfx_label_set_text_align(media_time_, GFX_TEXT_ALIGN_CENTER);
+            gfx_label_set_color(media_time_, GFX_COLOR_HEX(0xCFE8E2));
             gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, time_ofs);
             gfx_obj_set_visible(media_time_, true);
         }
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
         emote_unlock(h);
         emote_notify_all_refresh(h);
-        // Chẩn đoán: nếu label nào null = engine cạn pool object (in ra để biết còn phải bỏ bớt không)
-        ESP_LOGI(TAG, "media objs: title=%d bar_bg=%d bar_fg=%d time=%d",
-                 media_title_ != nullptr, media_bar_bg_ != nullptr,
-                 media_bar_fg_ != nullptr, media_time_ != nullptr);
+        ESP_LOGI(TAG, "media objs: title=%d time=%d cover=%d",
+                 media_title_ != nullptr, media_time_ != nullptr, has_cover);
         media_pos0_ = pos; media_dur_ = dur; media_t0_us_ = esp_timer_get_time(); media_active_ = true;
-        // Bìa: fetch+decode chậm -> đẩy sang task riêng (đặt media_active_ trước để task biết còn cần hiện).
+        // Ảnh nền: fetch+decode chậm -> đẩy sang task riêng (đặt media_active_ trước để task biết còn cần hiện).
         if (has_cover) {
             auto* rq = static_cast<PanelFetchReq*>(malloc(sizeof(PanelFetchReq)));
             if (rq != nullptr) {
@@ -947,11 +913,9 @@ private:
         emote_lock(h);
         if (media_title_ != nullptr) gfx_obj_set_visible(media_title_, false);
         if (media_time_ != nullptr) gfx_obj_set_visible(media_time_, false);
-        if (media_bar_bg_ != nullptr) gfx_obj_set_visible(media_bar_bg_, false);
-        if (media_bar_fg_ != nullptr) gfx_obj_set_visible(media_bar_fg_, false);
         emote_set_anim_visible(h, true);                           // trả mặt mèo
         emote_unlock(h);
-        disp->HideMediaCover();                                    // ẩn bìa media (tự khoá, gọi NGOÀI lock)
+        disp->HideMediaCover();                                    // ẩn ảnh nền media (tự khoá, gọi NGOÀI lock)
         emote_notify_all_refresh(h);
     }
 

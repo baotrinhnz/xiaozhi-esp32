@@ -310,8 +310,17 @@ void EmoteDisplay::HidePanel()
     panel_shown_ = false;
 }
 
-// Bìa nhỏ cho màn media native: KHÔNG giấu mặt mèo (ShowMedia đã tự giấu),
-// chỉ tạo/hiện 1 gfx image object ở đỉnh màn. HomeCenter đã resize sẵn (gfx image không scale được).
+// Tạo TRƯỚC obj ảnh nền media (rỗng) để z-order: nền nằm dưới các label tạo sau.
+void EmoteDisplay::CreateMediaCoverObj()
+{
+    if (!emote_handle_ || media_cover_img_ != nullptr) return;
+    emote_lock(emote_handle_);
+    media_cover_img_ = emote_create_obj_by_type(emote_handle_, "image", "media_cover");
+    if (media_cover_img_ != nullptr) gfx_obj_set_visible((gfx_obj_t*)media_cover_img_, false);
+    emote_unlock(emote_handle_);
+}
+
+// Ảnh NỀN full màn cho màn media (bìa dim+gradient 360x360 từ HomeCenter). Nạp vào obj đã tạo sẵn.
 bool EmoteDisplay::ShowMediaCover(const uint8_t* jpeg, size_t len)
 {
     if (!emote_handle_ || !jpeg || !len) {
@@ -355,7 +364,7 @@ bool EmoteDisplay::ShowMediaCover(const uint8_t* jpeg, size_t len)
     gfx_obj_t* obj = (gfx_obj_t*)media_cover_img_;
     gfx_img_set_src(obj, &s_cover_dsc);
     gfx_obj_set_size(obj, (uint16_t)w, (uint16_t)h);
-    gfx_obj_align(obj, GFX_ALIGN_TOP_MID, 0, 88);   // bìa nằm DƯỚI dòng subtitle của engine, label media nằm dưới bìa
+    gfx_obj_align(obj, GFX_ALIGN_CENTER, 0, 0);     // ảnh nền phủ full màn (360x360)
     gfx_obj_set_visible(obj, true);
     emote_unlock(emote_handle_);
     emote_notify_all_refresh(emote_handle_);

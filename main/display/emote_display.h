@@ -32,7 +32,9 @@ public:
     void HidePanel();
     bool IsPanelShown() const { return panel_shown_; }
 
-    // VoCat media mode: bìa nhỏ (JPEG đã resize sẵn ở HomeCenter) đặt trên cùng màn media native.
+    // VoCat media mode: ảnh nền full màn (bìa dim+gradient từ HomeCenter). CreateMediaCoverObj tạo obj RỖNG
+    // TRƯỚC khi tạo label -> nền nằm DƯỚI chữ (z-order theo thứ tự tạo). ShowMediaCover nạp ảnh vào obj đó.
+    void CreateMediaCoverObj();
     bool ShowMediaCover(const uint8_t* jpeg, size_t len);
     void HideMediaCover();
 
