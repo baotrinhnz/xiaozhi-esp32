@@ -355,7 +355,7 @@ bool EmoteDisplay::ShowMediaCover(const uint8_t* jpeg, size_t len)
     gfx_obj_t* obj = (gfx_obj_t*)media_cover_img_;
     gfx_img_set_src(obj, &s_cover_dsc);
     gfx_obj_set_size(obj, (uint16_t)w, (uint16_t)h);
-    gfx_obj_align(obj, GFX_ALIGN_TOP_MID, 0, 16);   // bìa ở đỉnh, label media nằm dưới
+    gfx_obj_align(obj, GFX_ALIGN_TOP_MID, 0, 88);   // bìa nằm DƯỚI dòng subtitle của engine, label media nằm dưới bìa
     gfx_obj_set_visible(obj, true);
     emote_unlock(emote_handle_);
     emote_notify_all_refresh(emote_handle_);

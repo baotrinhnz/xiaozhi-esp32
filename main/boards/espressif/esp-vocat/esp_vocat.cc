@@ -855,11 +855,12 @@ private:
         emote_handle_t h = disp->GetEmoteHandle();
         if (h == nullptr) return;
         bool has_cover = (cover_url != nullptr && cover_url[0] != '\0');
-        // Có bìa: bìa 96x124 nằm đỉnh (y16..140) -> đẩy khối chữ xuống dưới. Không bìa: giữ bố cục cũ.
-        const int title_ofs = has_cover ? -30 : -46;   // GFX_ALIGN_CENTER y offset (center=180)
-        const int author_ofs = has_cover ? 6 : -8;
-        const int bar_y = has_cover ? 224 : 214;       // toạ độ tuyệt đối
-        const int time_ofs = has_cover ? 82 : 78;
+        (void)author;   // BỎ dòng tác giả (xem chú thích dưới) — giữ tham số cho tương thích tool
+        // Có bìa: bìa nhỏ (84x108) nằm DƯỚI dòng subtitle của engine (y88..196) -> khối chữ nằm dưới bìa.
+        // BỎ dòng tác giả: engine gfx chỉ dựng được ~4 label; thêm author thì label "time" (thứ 5) KHÔNG tạo được -> mất giờ.
+        const int title_ofs = has_cover ? 40 : -40;    // GFX_ALIGN_CENTER y offset (center=180)
+        const int bar_y = has_cover ? 254 : 214;       // toạ độ tuyệt đối
+        const int time_ofs = has_cover ? 98 : 76;
         const int bx = (360 - kBarW) / 2;                          // căn giữa thanh
         if (!has_cover) disp->HideMediaCover();                     // bài không bìa -> ẩn bìa cũ (tự khoá, gọi NGOÀI lock)
         emote_lock(h);
@@ -874,16 +875,6 @@ private:
             gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);
             gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, title_ofs);
             gfx_obj_set_visible(media_title_, true);
-        }
-        // Tác giả / ca sĩ
-        if (media_author_ == nullptr) media_author_ = emote_create_obj_by_type(h, "label", "media_author");
-        if (media_author_ != nullptr) {
-            bool has = (author != nullptr && author[0] != '\0');
-            gfx_label_set_font(media_author_, (void*)&vocat_vn_26);
-            gfx_label_set_color(media_author_, GFX_COLOR_HEX(0x9FC8C0));
-            gfx_label_set_text(media_author_, has ? author : " ");
-            gfx_obj_align(media_author_, GFX_ALIGN_CENTER, 0, author_ofs);
-            gfx_obj_set_visible(media_author_, has);
         }
         // Thanh progress: nền (track) + phần đã phát — dùng label BẬT NỀN làm hình chữ nhật
         if (media_bar_bg_ == nullptr) media_bar_bg_ = emote_create_obj_by_type(h, "label", "media_bar_bg");
@@ -922,6 +913,10 @@ private:
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
         emote_unlock(h);
         emote_notify_all_refresh(h);
+        // Chẩn đoán: nếu label nào null = engine cạn pool object (in ra để biết còn phải bỏ bớt không)
+        ESP_LOGI(TAG, "media objs: title=%d bar_bg=%d bar_fg=%d time=%d",
+                 media_title_ != nullptr, media_bar_bg_ != nullptr,
+                 media_bar_fg_ != nullptr, media_time_ != nullptr);
         media_pos0_ = pos; media_dur_ = dur; media_t0_us_ = esp_timer_get_time(); media_active_ = true;
         // Bìa: fetch+decode chậm -> đẩy sang task riêng (đặt media_active_ trước để task biết còn cần hiện).
         if (has_cover) {
@@ -951,7 +946,6 @@ private:
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
         if (media_title_ != nullptr) gfx_obj_set_visible(media_title_, false);
-        if (media_author_ != nullptr) gfx_obj_set_visible(media_author_, false);
         if (media_time_ != nullptr) gfx_obj_set_visible(media_time_, false);
         if (media_bar_bg_ != nullptr) gfx_obj_set_visible(media_bar_bg_, false);
         if (media_bar_fg_ != nullptr) gfx_obj_set_visible(media_bar_fg_, false);
@@ -959,6 +953,22 @@ private:
         emote_unlock(h);
         disp->HideMediaCover();                                    // ẩn bìa media (tự khoá, gọi NGOÀI lock)
         emote_notify_all_refresh(h);
+    }
+
+    // Đóng panel (lịch/thời tiết...). Nếu ĐANG phát media -> quay về màn media (giữ ẩn mặt mèo),
+    // KHÔNG bật lại mặt mèo (nếu bật thì mặt mèo chồng lên chữ media -> bug "kẹt hai mắt mèo").
+    void DismissPanel() {
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr) return;
+        disp->HidePanel();                                         // ẩn ảnh panel + (mặc định) bật lại mặt mèo
+        panel_active_ = false;
+        if (media_active_) {                                       // còn phát -> media labels vẫn hiện, chỉ cần ẩn lại mặt mèo
+            emote_handle_t h = disp->GetEmoteHandle();
+            emote_lock(h);
+            emote_set_anim_visible(h, false);
+            emote_unlock(h);
+            emote_notify_all_refresh(h);
+        }
     }
 
     // Đăng ký tool MCP: brain (khi user "Mèo cho xem lịch") gọi -> hiện panel của người chỉ định.
@@ -1032,16 +1042,15 @@ private:
         int dx = touch_lx_ - touch_sx_, dy = touch_ly_ - touch_sy_;
         const int SW = 45;                                  // ngưỡng vuốt (px)
         auto& app = Application::GetInstance();
-        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (abs(dx) >= SW && abs(dx) >= abs(dy)) {          // vuốt NGANG -> vào/đổi page
             if (!panel_active_) panel_n_ = 0;
             else panel_n_ += (dx < 0 ? 1 : -1);             // vuốt trái = trang kế, phải = trang trước
             FetchAndShowPanel(panel_n_);
         } else if (dy <= -SW && abs(dy) > abs(dx)) {        // vuốt LÊN -> thoát panel
-            if (panel_active_ && disp) { disp->HidePanel(); panel_active_ = false; }
+            if (panel_active_) DismissPanel();
         } else {                                            // CHẠM (di chuyển nhỏ)
-            if (panel_active_ && disp) {                    // đang xem panel -> chạm để thoát
-                disp->HidePanel(); panel_active_ = false;
+            if (panel_active_) {                            // đang xem panel -> chạm để thoát
+                DismissPanel();
             } else if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
             } else {
