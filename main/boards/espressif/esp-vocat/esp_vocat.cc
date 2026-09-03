@@ -838,7 +838,8 @@ private:
         // Thanh progress 10 ô: █ đã phát, ░ còn lại (UTF-8: █=E2 96 88, ░=E2 96 91)
         const int CELLS = 10;
         int filled = (media_dur_ > 0) ? (int)(((int64_t)CELLS * pos + media_dur_ / 2) / media_dur_) : 0;
-        if (filled < 0) filled = 0; if (filled > CELLS) filled = CELLS;
+        if (filled < 0) filled = 0;
+        if (filled > CELLS) filled = CELLS;
         char bar[CELLS * 3 + 1]; int bp = 0;
         for (int i = 0; i < CELLS; i++) {
             const char* g = (i < filled) ? "\xE2\x96\x88" : "\xE2\x96\x91";
