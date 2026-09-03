@@ -5,7 +5,11 @@
 #include "config.h"
 #include "display/emote_display.h"
 #include "display/lcd_display.h"
+#include "gfx.h"                        // gfx_label_* / gfx_obj_* cho màn media native (tên cuộn + giờ)
 #include "mcp_server.h"                 // đăng ký tool MCP self.screen.show_panel (brain ra lệnh hiện panel)
+
+// Font tiếng Việt (LVGL v9, nhúng từ vocat_vn_26.c cùng thư mục board) cho màn media native.
+LV_FONT_DECLARE(vocat_vn_26);
 #include "esp_video.h"
 #include "wifi_board.h"
 
@@ -473,6 +477,14 @@ private:
     int panel_count_ = 1;
     uint32_t touch_t0_ = 0;
     int touch_sx_ = 0, touch_sy_ = 0, touch_lx_ = 0, touch_ly_ = 0;
+    // Màn media native (tên cuộn + giờ tick trên máy) — thay panel-ảnh cho audiobook, khỏi refresh ảnh.
+    gfx_obj_t* media_title_ = nullptr;
+    gfx_obj_t* media_time_ = nullptr;
+    esp_timer_handle_t media_timer_ = nullptr;
+    int media_pos0_ = 0;                // vị trí (giây) lúc bắt đầu hiện
+    int media_dur_ = 0;                 // tổng thời lượng (giây)
+    int64_t media_t0_us_ = 0;           // mốc thời gian bắt đầu hiện
+    bool media_active_ = false;
     uint8_t low_battery_alert_mask_ = 0;
     int low_battery_plays_left_ = 0;
     int64_t next_low_battery_play_ms_ = 0;
@@ -769,6 +781,84 @@ private:
         vTaskDelete(nullptr);
     }
 
+    // ---- Màn MEDIA native: tên (cuộn mượt) + giờ (tick trên máy). Bỏ refresh ảnh -> không tải server, không giựt audio. ----
+    static void FmtTime(char* buf, size_t n, int s) {
+        if (s < 0) s = 0;
+        if (s < 3600) snprintf(buf, n, "%d:%02d", s / 60, s % 60);
+        else snprintf(buf, n, "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60);
+    }
+
+    void UpdateMediaTimeLabel() {
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr || media_time_ == nullptr || !media_active_) return;
+        int pos = media_pos0_ + (int)((esp_timer_get_time() - media_t0_us_) / 1000000);
+        if (media_dur_ > 0 && pos > media_dur_) pos = media_dur_;
+        char a[16], b[16], line[40];
+        FmtTime(a, sizeof(a), pos);
+        FmtTime(b, sizeof(b), media_dur_);
+        snprintf(line, sizeof(line), "%s / %s", a, b);
+        emote_handle_t h = disp->GetEmoteHandle();
+        emote_lock(h);
+        gfx_label_set_text(media_time_, line);
+        emote_unlock(h);
+        emote_notify_all_refresh(h);
+    }
+
+    static void MediaTickCb(void* arg) { static_cast<EspVocat*>(arg)->UpdateMediaTimeLabel(); }
+
+    void ShowMedia(const char* title, int pos, int dur) {
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr) return;
+        emote_handle_t h = disp->GetEmoteHandle();
+        if (h == nullptr) return;
+        emote_lock(h);
+        if (media_title_ == nullptr) media_title_ = emote_create_obj_by_type(h, "label", "media_title");
+        if (media_title_ != nullptr) {
+            gfx_label_set_font(media_title_, (void*)&vocat_vn_26);
+            gfx_label_set_color(media_title_, GFX_COLOR_HEX(0xF5F5F5));
+            gfx_obj_set_size(media_title_, 300, 40);
+            gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);
+            gfx_label_set_scroll_speed(media_title_, 50);          // chậm
+            gfx_label_set_text(media_title_, title ? title : "");
+            gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, -10);
+            gfx_obj_set_visible(media_title_, true);
+        }
+        if (media_time_ == nullptr) media_time_ = emote_create_obj_by_type(h, "label", "media_time");
+        if (media_time_ != nullptr) {
+            gfx_label_set_font(media_time_, (void*)&vocat_vn_26);
+            gfx_label_set_color(media_time_, GFX_COLOR_HEX(0x9FC8C0));
+            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, 90);
+            gfx_obj_set_visible(media_time_, true);
+        }
+        emote_set_anim_visible(h, false);                          // ẩn mặt mèo
+        emote_unlock(h);
+        emote_notify_all_refresh(h);
+        media_pos0_ = pos; media_dur_ = dur; media_t0_us_ = esp_timer_get_time(); media_active_ = true;
+        UpdateMediaTimeLabel();
+        if (media_timer_ == nullptr) {
+            esp_timer_create_args_t a = {};
+            a.callback = MediaTickCb; a.arg = this; a.name = "media_tick";
+            esp_timer_create(&a, &media_timer_);
+        }
+        esp_timer_stop(media_timer_);
+        esp_timer_start_periodic(media_timer_, 1000000);           // tick mỗi 1s (giờ nhảy trên máy)
+    }
+
+    void HideMedia() {
+        if (!media_active_) return;
+        media_active_ = false;
+        if (media_timer_ != nullptr) esp_timer_stop(media_timer_);
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr) return;
+        emote_handle_t h = disp->GetEmoteHandle();
+        emote_lock(h);
+        if (media_title_ != nullptr) gfx_obj_set_visible(media_title_, false);
+        if (media_time_ != nullptr) gfx_obj_set_visible(media_time_, false);
+        emote_set_anim_visible(h, true);                           // trả mặt mèo
+        emote_unlock(h);
+        emote_notify_all_refresh(h);
+    }
+
     // Đăng ký tool MCP: brain (khi user "Mèo cho xem lịch") gọi -> hiện panel của người chỉ định.
     void InitializeTools() {
         auto& mcp = McpServer::GetInstance();
@@ -800,7 +890,25 @@ private:
             [this](const PropertyList&) -> ReturnValue {
                 auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
                 if (disp != nullptr) disp->HidePanel();
+                HideMedia();                                   // đóng cả màn media native (nếu đang hiện)
                 panel_active_ = false;
+                return true;
+            });
+        // Màn "đang phát" NATIVE (tên cuộn + giờ tick trên máy) — thay panel-ảnh cho audiobook/nhạc, khỏi refresh ảnh.
+        mcp.AddTool(
+            "self.screen.media_show",
+            "Hiển thị màn đang phát NATIVE: tên bài/sách (chữ tự cuộn ngang) + thời gian (tự nhảy trên máy). "
+            "Gọi 1 lần khi bắt đầu phát nhạc/sách nói. title=tên, pos=số giây đã phát, dur=tổng số giây.",
+            PropertyList({
+                Property("title", kPropertyTypeString, std::string("")),
+                Property("pos", kPropertyTypeInteger, 0),
+                Property("dur", kPropertyTypeInteger, 0),
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                std::string title = properties["title"].value<std::string>();
+                int pos = properties["pos"].value<int>();
+                int dur = properties["dur"].value<int>();
+                ShowMedia(title.c_str(), pos, dur);
                 return true;
             });
     }
