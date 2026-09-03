@@ -310,6 +310,72 @@ void EmoteDisplay::HidePanel()
     panel_shown_ = false;
 }
 
+// Bìa nhỏ cho màn media native: KHÔNG giấu mặt mèo (ShowMedia đã tự giấu),
+// chỉ tạo/hiện 1 gfx image object ở đỉnh màn. HomeCenter đã resize sẵn (gfx image không scale được).
+bool EmoteDisplay::ShowMediaCover(const uint8_t* jpeg, size_t len)
+{
+    if (!emote_handle_ || !jpeg || !len) {
+        return false;
+    }
+    uint8_t* rgb = nullptr;
+    size_t rgb_len = 0, w = 0, h = 0, stride = 0;
+    if (jpeg_to_image(jpeg, len, &rgb, &rgb_len, &w, &h, &stride) != ESP_OK || rgb == nullptr) {
+        ESP_LOGE(TAG, "ShowMediaCover: JPEG decode failed");
+        return false;
+    }
+    emote_lock(emote_handle_);
+    if (media_cover_rgb_) {
+        free(media_cover_rgb_);
+    }
+    media_cover_rgb_ = rgb;
+    {
+        uint16_t* px = reinterpret_cast<uint16_t*>(media_cover_rgb_);
+        size_t npx = rgb_len / 2;
+        for (size_t i = 0; i < npx; ++i) {
+            px[i] = __builtin_bswap16(px[i]);       // little-endian -> gfx đọc ngược
+        }
+    }
+    static gfx_image_dsc_t s_cover_dsc;              // 1 bìa media duy nhất
+    s_cover_dsc.header.magic = C_ARRAY_HEADER_MAGIC;
+    s_cover_dsc.header.flags = 0;
+    s_cover_dsc.header.cf = GFX_COLOR_FORMAT_RGB565;
+    s_cover_dsc.header.w = (uint16_t)w;
+    s_cover_dsc.header.h = (uint16_t)h;
+    s_cover_dsc.header.stride = (uint16_t)stride;
+    s_cover_dsc.data = media_cover_rgb_;
+    s_cover_dsc.data_size = (uint32_t)rgb_len;
+    if (media_cover_img_ == nullptr) {
+        media_cover_img_ = emote_create_obj_by_type(emote_handle_, "image", "media_cover");
+    }
+    if (media_cover_img_ == nullptr) {
+        emote_unlock(emote_handle_);
+        ESP_LOGE(TAG, "ShowMediaCover: create image obj failed");
+        return false;
+    }
+    gfx_obj_t* obj = (gfx_obj_t*)media_cover_img_;
+    gfx_img_set_src(obj, &s_cover_dsc);
+    gfx_obj_set_size(obj, (uint16_t)w, (uint16_t)h);
+    gfx_obj_align(obj, GFX_ALIGN_TOP_MID, 0, 16);   // bìa ở đỉnh, label media nằm dưới
+    gfx_obj_set_visible(obj, true);
+    emote_unlock(emote_handle_);
+    emote_notify_all_refresh(emote_handle_);
+    ESP_LOGI(TAG, "ShowMediaCover: %ux%u", (unsigned)w, (unsigned)h);
+    return true;
+}
+
+void EmoteDisplay::HideMediaCover()
+{
+    if (!emote_handle_) {
+        return;
+    }
+    emote_lock(emote_handle_);
+    if (media_cover_img_) {
+        gfx_obj_set_visible((gfx_obj_t*)media_cover_img_, false);
+    }
+    emote_unlock(emote_handle_);
+    emote_notify_all_refresh(emote_handle_);
+}
+
 void EmoteDisplay::RefreshAll()
 {
     if (emote_handle_) {

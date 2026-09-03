@@ -32,6 +32,10 @@ public:
     void HidePanel();
     bool IsPanelShown() const { return panel_shown_; }
 
+    // VoCat media mode: bìa nhỏ (JPEG đã resize sẵn ở HomeCenter) đặt trên cùng màn media native.
+    bool ShowMediaCover(const uint8_t* jpeg, size_t len);
+    void HideMediaCover();
+
     void RefreshAll();
 
     // Get emote handle for internal use
@@ -46,6 +50,9 @@ private:
     void* panel_img_ = nullptr;             // gfx_obj_t* của ảnh panel (tạo 1 lần, tái dùng)
     uint8_t* panel_rgb_ = nullptr;          // buffer RGB565 đã decode (giữ sống khi engine hiện)
     bool panel_shown_ = false;
+
+    void* media_cover_img_ = nullptr;       // gfx_obj_t* của bìa media (tạo 1 lần, tái dùng)
+    uint8_t* media_cover_rgb_ = nullptr;    // buffer RGB565 bìa (giữ sống khi engine hiện)
 };
 
 } // namespace emote

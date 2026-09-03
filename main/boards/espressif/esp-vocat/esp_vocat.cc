@@ -784,6 +784,41 @@ private:
         vTaskDelete(nullptr);
     }
 
+    // Tải bìa JPEG (đã resize sẵn ở HomeCenter) -> hiện lên đỉnh màn media (KHÔNG đè mặt mèo — media tự ẩn mặt).
+    bool FetchUrlAndShowCover(const char* url) {
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr) return false;
+        esp_http_client_config_t cfg = {};
+        cfg.url = url;
+        cfg.timeout_ms = 8000;
+        esp_http_client_handle_t c = esp_http_client_init(&cfg);
+        if (c == nullptr) return false;
+        bool ok = false;
+        uint8_t* buf = nullptr;
+        do {
+            if (esp_http_client_open(c, 0) != ESP_OK) break;
+            int clen = esp_http_client_fetch_headers(c);
+            if (clen <= 0 || clen > 200000) break;
+            buf = (uint8_t*)malloc(clen);
+            if (buf == nullptr) break;
+            int off = 0, r = 0;
+            while (off < clen && (r = esp_http_client_read(c, (char*)buf + off, clen - off)) > 0) {
+                off += r;
+            }
+            if (off == clen && media_active_ && disp->ShowMediaCover(buf, clen)) ok = true;
+        } while (0);
+        if (buf) free(buf);
+        esp_http_client_close(c);
+        esp_http_client_cleanup(c);
+        return ok;
+    }
+    static void MediaCoverFetchTask(void* arg) {
+        auto* rq = static_cast<PanelFetchReq*>(arg);
+        rq->self->FetchUrlAndShowCover(rq->url);
+        free(rq);
+        vTaskDelete(nullptr);
+    }
+
     // ---- Màn MEDIA native: tên (cuộn mượt) + giờ (tick trên máy). Bỏ refresh ảnh -> không tải server, không giựt audio. ----
     static void FmtTime(char* buf, size_t n, int s) {
         if (s < 0) s = 0;
@@ -814,13 +849,19 @@ private:
 
     static void MediaTickCb(void* arg) { static_cast<EspVocat*>(arg)->UpdateMediaTimeLabel(); }
 
-    void ShowMedia(const char* title, const char* author, int pos, int dur) {
+    void ShowMedia(const char* title, const char* author, int pos, int dur, const char* cover_url) {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr) return;
         emote_handle_t h = disp->GetEmoteHandle();
         if (h == nullptr) return;
+        bool has_cover = (cover_url != nullptr && cover_url[0] != '\0');
+        // Có bìa: bìa 96x124 nằm đỉnh (y16..140) -> đẩy khối chữ xuống dưới. Không bìa: giữ bố cục cũ.
+        const int title_ofs = has_cover ? -30 : -46;   // GFX_ALIGN_CENTER y offset (center=180)
+        const int author_ofs = has_cover ? 6 : -8;
+        const int bar_y = has_cover ? 224 : 214;       // toạ độ tuyệt đối
+        const int time_ofs = has_cover ? 82 : 78;
         const int bx = (360 - kBarW) / 2;                          // căn giữa thanh
-        const int bar_y = 214;
+        if (!has_cover) disp->HideMediaCover();                     // bài không bìa -> ẩn bìa cũ (tự khoá, gọi NGOÀI lock)
         emote_lock(h);
         // Tên sách/bài (cuộn native)
         if (media_title_ == nullptr) media_title_ = emote_create_obj_by_type(h, "label", "media_title");
@@ -831,7 +872,7 @@ private:
             gfx_label_set_scroll_speed(media_title_, 50);
             gfx_label_set_text(media_title_, title ? title : "");
             gfx_label_set_long_mode(media_title_, GFX_LABEL_LONG_SCROLL);
-            gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, -46);
+            gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, title_ofs);
             gfx_obj_set_visible(media_title_, true);
         }
         // Tác giả / ca sĩ
@@ -841,7 +882,7 @@ private:
             gfx_label_set_font(media_author_, (void*)&vocat_vn_26);
             gfx_label_set_color(media_author_, GFX_COLOR_HEX(0x9FC8C0));
             gfx_label_set_text(media_author_, has ? author : " ");
-            gfx_obj_align(media_author_, GFX_ALIGN_CENTER, 0, -8);
+            gfx_obj_align(media_author_, GFX_ALIGN_CENTER, 0, author_ofs);
             gfx_obj_set_visible(media_author_, has);
         }
         // Thanh progress: nền (track) + phần đã phát — dùng label BẬT NỀN làm hình chữ nhật
@@ -875,13 +916,22 @@ private:
             gfx_obj_set_size(media_time_, 240, 34);
             gfx_label_set_text(media_time_, line0);
             gfx_label_set_text_align(media_time_, GFX_TEXT_ALIGN_CENTER);
-            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, 78);
+            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, time_ofs);
             gfx_obj_set_visible(media_time_, true);
         }
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
         emote_unlock(h);
         emote_notify_all_refresh(h);
         media_pos0_ = pos; media_dur_ = dur; media_t0_us_ = esp_timer_get_time(); media_active_ = true;
+        // Bìa: fetch+decode chậm -> đẩy sang task riêng (đặt media_active_ trước để task biết còn cần hiện).
+        if (has_cover) {
+            auto* rq = static_cast<PanelFetchReq*>(malloc(sizeof(PanelFetchReq)));
+            if (rq != nullptr) {
+                rq->self = this;
+                snprintf(rq->url, sizeof(rq->url), "%s", cover_url);
+                xTaskCreatePinnedToCore(MediaCoverFetchTask, "media_cover", 4 * 1024, rq, 5, nullptr, 0);
+            }
+        }
         UpdateMediaTimeLabel();
         if (media_timer_ == nullptr) {
             esp_timer_create_args_t a = {};
@@ -907,6 +957,7 @@ private:
         if (media_bar_fg_ != nullptr) gfx_obj_set_visible(media_bar_fg_, false);
         emote_set_anim_visible(h, true);                           // trả mặt mèo
         emote_unlock(h);
+        disp->HideMediaCover();                                    // ẩn bìa media (tự khoá, gọi NGOÀI lock)
         emote_notify_all_refresh(h);
     }
 
@@ -949,19 +1000,22 @@ private:
         mcp.AddTool(
             "self.screen.media_show",
             "Hiển thị màn đang phát NATIVE: tên bài/sách (chữ tự cuộn ngang) + thời gian (tự nhảy trên máy). "
-            "Gọi 1 lần khi bắt đầu phát nhạc/sách nói. title=tên, pos=số giây đã phát, dur=tổng số giây.",
+            "Gọi 1 lần khi bắt đầu phát nhạc/sách nói. title=tên, pos=số giây đã phát, dur=tổng số giây, "
+            "cover=URL ảnh bìa (đã resize sẵn, để trống nếu không có).",
             PropertyList({
                 Property("title", kPropertyTypeString, std::string("")),
                 Property("author", kPropertyTypeString, std::string("")),
                 Property("pos", kPropertyTypeInteger, 0),
                 Property("dur", kPropertyTypeInteger, 0),
+                Property("cover", kPropertyTypeString, std::string("")),
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 std::string title = properties["title"].value<std::string>();
                 std::string author = properties["author"].value<std::string>();
                 int pos = properties["pos"].value<int>();
                 int dur = properties["dur"].value<int>();
-                ShowMedia(title.c_str(), author.c_str(), pos, dur);
+                std::string cover = properties["cover"].value<std::string>();
+                ShowMedia(title.c_str(), author.c_str(), pos, dur, cover.c_str());
                 return true;
             });
     }
