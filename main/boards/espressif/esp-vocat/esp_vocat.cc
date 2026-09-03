@@ -863,12 +863,19 @@ private:
             gfx_obj_set_pos(media_bar_fg_, bx, bar_y);
             gfx_obj_set_visible(media_bar_fg_, true);
         }
-        // Giờ
+        // Giờ (set size + text + căn giữa rõ ràng để chắc hiện)
         if (media_time_ == nullptr) media_time_ = emote_create_obj_by_type(h, "label", "media_time");
         if (media_time_ != nullptr) {
+            char a0[16], b0[16], line0[40];
+            FmtTime(a0, sizeof(a0), pos);
+            FmtTime(b0, sizeof(b0), dur);
+            snprintf(line0, sizeof(line0), "%s / %s", a0, b0);
             gfx_label_set_font(media_time_, (void*)&vocat_vn_26);
             gfx_label_set_color(media_time_, GFX_COLOR_HEX(0x9FC8C0));
-            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, 66);
+            gfx_obj_set_size(media_time_, 240, 34);
+            gfx_label_set_text(media_time_, line0);
+            gfx_label_set_text_align(media_time_, GFX_TEXT_ALIGN_CENTER);
+            gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, 78);
             gfx_obj_set_visible(media_time_, true);
         }
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
