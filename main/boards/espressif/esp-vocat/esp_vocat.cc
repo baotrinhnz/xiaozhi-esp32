@@ -836,16 +836,17 @@ private:
         FmtTime(a, sizeof(a), pos);
         FmtTime(b, sizeof(b), media_dur_);
         snprintf(line, sizeof(line), "%s / %s", a, b);       // "đã nghe / tổng" = tiến độ dạng số
-        // Thanh progress 10 ô: █ đã phát, ░ còn lại (UTF-8: █=E2 96 88, ░=E2 96 91)
-        const int CELLS = 10;
-        int filled = (media_dur_ > 0) ? (int)(((int64_t)CELLS * pos + media_dur_ / 2) / media_dur_) : 0;
-        if (filled < 0) filled = 0;
-        if (filled > CELLS) filled = CELLS;
-        char bar[CELLS * 3 + 1]; int bp = 0;
-        for (int i = 0; i < CELLS; i++) {
-            const char* g = (i < filled) ? "\xE2\x96\x88" : "\xE2\x96\x91";
-            bar[bp++] = g[0]; bar[bp++] = g[1]; bar[bp++] = g[2];
-        }
+        // Thanh progress MỊN: mỗi ô 2 mức nhờ khối NỬA ▌ -> 2*CELLS mức (mịn gấp đôi 10 ô đặc).
+        // UTF-8: █=E2 96 88 (đầy), ▌=E2 96 8C (nửa trái), ░=E2 96 91 (rỗng).
+        const int CELLS = 12;
+        int halves = (media_dur_ > 0) ? (int)(((int64_t)2 * CELLS * pos + media_dur_ / 2) / media_dur_) : 0;
+        if (halves < 0) halves = 0;
+        if (halves > 2 * CELLS) halves = 2 * CELLS;
+        int full = halves / 2, half = halves % 2;
+        char bar[CELLS * 3 + 4]; int bp = 0;
+        for (int i = 0; i < full; i++) { bar[bp++] = '\xE2'; bar[bp++] = '\x96'; bar[bp++] = '\x88'; }        // █
+        if (half && full < CELLS) { bar[bp++] = '\xE2'; bar[bp++] = '\x96'; bar[bp++] = '\x8C'; }             // ▌
+        for (int i = full + half; i < CELLS; i++) { bar[bp++] = '\xE2'; bar[bp++] = '\x96'; bar[bp++] = '\x91'; }  // ░
         bar[bp] = 0;
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
@@ -903,7 +904,7 @@ private:
                 gfx_label_set_font(media_bar_fg_, (void*)&vocat_vn_26);
                 gfx_label_set_color(media_bar_fg_, GFX_COLOR_HEX(0x7FD1C4));
                 gfx_obj_set_size(media_bar_fg_, 300, 40);
-                gfx_label_set_text(media_bar_fg_, "\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91");
+                gfx_label_set_text(media_bar_fg_, "\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91");
                 gfx_label_set_text_align(media_bar_fg_, GFX_TEXT_ALIGN_CENTER);
                 gfx_obj_align(media_bar_fg_, GFX_ALIGN_CENTER, 0, prog_ofs);
                 gfx_obj_set_visible(media_bar_fg_, true);
