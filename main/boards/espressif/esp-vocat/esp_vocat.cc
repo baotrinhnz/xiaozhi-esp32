@@ -870,11 +870,14 @@ private:
             gfx_obj_align(media_title_, GFX_ALIGN_CENTER, 0, title_ofs);
             gfx_obj_set_visible(media_title_, true);
         }
-        // Giờ "đã nghe / tổng" — CÔNG THỨC TỐI GIẢN như 2a (không set_size/text_align) để CHẮC hiện; text set ở UpdateMediaTimeLabel
+        // Giờ "đã nghe / tổng". PHẢI set_size + set_text (giống title) mới render — label không size = không hiện.
         if (media_time_ == nullptr) media_time_ = emote_create_obj_by_type(h, "label", "media_time");
         if (media_time_ != nullptr) {
             gfx_label_set_font(media_time_, (void*)&vocat_vn_26);
-            gfx_label_set_color(media_time_, GFX_COLOR_HEX(0xCFE8E2));
+            gfx_label_set_color(media_time_, GFX_COLOR_HEX(0xEAF6F3));
+            gfx_obj_set_size(media_time_, 300, 40);
+            gfx_label_set_text(media_time_, "0:00 / 0:00");
+            gfx_label_set_text_align(media_time_, GFX_TEXT_ALIGN_CENTER);
             gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, time_ofs);
             gfx_obj_set_visible(media_time_, true);
         }
