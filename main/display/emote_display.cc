@@ -385,6 +385,44 @@ void EmoteDisplay::HideMediaCover()
     emote_notify_all_refresh(emote_handle_);
 }
 
+// Visualizer nhạc: board tự vẽ cột vào buffer RGB565 (đã byteswap khớp gfx) rồi gọi mỗi frame.
+// Tạo obj SAU labels/bìa nên nằm trên; đặt ở khu đáy (vùng tối) nên nền đen của ảnh đỡ chỏi.
+void EmoteDisplay::ShowViz(const uint16_t* rgb565, int w, int h, int y_ofs)
+{
+    if (!emote_handle_ || rgb565 == nullptr) return;
+    static gfx_image_dsc_t s_viz_dsc;
+    s_viz_dsc.header.magic = C_ARRAY_HEADER_MAGIC;
+    s_viz_dsc.header.flags = 0;
+    s_viz_dsc.header.cf = GFX_COLOR_FORMAT_RGB565;
+    s_viz_dsc.header.w = (uint16_t)w;
+    s_viz_dsc.header.h = (uint16_t)h;
+    s_viz_dsc.header.stride = (uint16_t)(w * 2);
+    s_viz_dsc.data = (const uint8_t*)rgb565;
+    s_viz_dsc.data_size = (uint32_t)(w * h * 2);
+    emote_lock(emote_handle_);
+    if (media_viz_img_ == nullptr) {
+        media_viz_img_ = emote_create_obj_by_type(emote_handle_, "image", "media_viz");
+    }
+    if (media_viz_img_ != nullptr) {
+        gfx_obj_t* o = (gfx_obj_t*)media_viz_img_;
+        gfx_img_set_src(o, &s_viz_dsc);
+        gfx_obj_set_size(o, (uint16_t)w, (uint16_t)h);
+        gfx_obj_align(o, GFX_ALIGN_CENTER, 0, y_ofs);
+        gfx_obj_set_visible(o, true);
+    }
+    emote_unlock(emote_handle_);
+    emote_notify_all_refresh(emote_handle_);
+}
+
+void EmoteDisplay::HideViz()
+{
+    if (!emote_handle_ || media_viz_img_ == nullptr) return;
+    emote_lock(emote_handle_);
+    gfx_obj_set_visible((gfx_obj_t*)media_viz_img_, false);
+    emote_unlock(emote_handle_);
+    emote_notify_all_refresh(emote_handle_);
+}
+
 void EmoteDisplay::RefreshAll()
 {
     if (emote_handle_) {

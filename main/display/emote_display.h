@@ -38,6 +38,10 @@ public:
     bool ShowMediaCover(const uint8_t* jpeg, size_t len);
     void HideMediaCover();
 
+    // VoCat visualizer nhạc: hiện/refresh 1 ảnh RGB565 (board tự vẽ cột) đè lên nền media; HideViz ẩn đi.
+    void ShowViz(const uint16_t* rgb565, int w, int h, int y_ofs);
+    void HideViz();
+
     void RefreshAll();
 
     // Get emote handle for internal use
@@ -55,6 +59,7 @@ private:
 
     void* media_cover_img_ = nullptr;       // gfx_obj_t* của bìa media (tạo 1 lần, tái dùng)
     uint8_t* media_cover_rgb_ = nullptr;    // buffer RGB565 bìa (giữ sống khi engine hiện)
+    void* media_viz_img_ = nullptr;         // gfx_obj_t* của ảnh visualizer nhạc (tạo 1 lần)
 };
 
 } // namespace emote

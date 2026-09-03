@@ -45,8 +45,13 @@ extern "C" {
 #include <freertos/semphr.h>
 #include <freertos/task.h>
 #include "driver/temperature_sensor.h"
+#include <math.h>
+#include "esp_heap_caps.h"
+#include "esp_random.h"
 
 #define TAG "ESP-VoCat"
+
+extern uint16_t vocat_audio_peak();   // mức âm output (audio_service.cc) -> visualizer nhạc
 
 namespace Bmi270Motion {
 static bmi270_handle_t bmi_handle_ = nullptr;
@@ -489,6 +494,12 @@ private:
     int64_t media_t0_us_ = 0;           // mốc thời gian bắt đầu hiện
     bool media_active_ = false;
     bool media_bar_on_ = true;          // có vẽ thanh progress không (sách=có, nhạc=không)
+    // Visualizer nhạc (tự vẽ cột vào ảnh RGB565, refresh ~15fps theo mức âm)
+    static constexpr int VIZ_W = 200, VIZ_H = 46, VIZ_N = 16;
+    uint16_t* viz_buf_ = nullptr;
+    float viz_bars_[VIZ_N] = {0};
+    volatile bool viz_run_ = false;         // task viz chạy hay nghỉ
+    TaskHandle_t viz_task_ = nullptr;
     uint8_t low_battery_alert_mask_ = 0;
     int low_battery_plays_left_ = 0;
     int64_t next_low_battery_play_ms_ = 0;
@@ -757,6 +768,7 @@ private:
             }
             if (off == clen && disp->ShowPanelImage(buf, clen)) {
                 panel_active_ = true;
+                StopViz();          // panel (lịch...) đè lên -> tạm dừng visualizer kẻo bars đè lên panel
                 ok = true;
             }
         } while (0);
@@ -858,6 +870,71 @@ private:
 
     static void MediaTickCb(void* arg) { static_cast<EspVocat*>(arg)->UpdateMediaTimeLabel(); }
 
+    // ---- Visualizer nhạc: mỗi frame đọc mức âm -> cập nhật cột (lên ngay, rơi từ từ) -> vẽ RGB565 -> ShowViz ----
+    static inline uint16_t VizRgb565(uint8_t r, uint8_t g, uint8_t b) {
+        return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+    }
+    void VizTick() {
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp == nullptr || !media_active_ || viz_buf_ == nullptr) return;
+        float lvl = vocat_audio_peak() / 32768.0f;
+        if (lvl > 1.0f) lvl = 1.0f;
+        lvl = powf(lvl, 0.55f);                                   // nén cho mức nhỏ cũng thấy
+        for (int b = 0; b < VIZ_N; b++) {
+            float shape = 0.55f + 0.45f * sinf(3.14159f * (b + 0.5f) / VIZ_N);   // giữa cao, mép thấp
+            float flick = 0.75f + 0.25f * ((esp_random() & 0xFF) / 255.0f);
+            float target = lvl * shape * flick;
+            if (target > 1.0f) target = 1.0f;
+            if (target > viz_bars_[b]) {
+                viz_bars_[b] = target;                            // lên ngay
+            } else {
+                viz_bars_[b] -= 0.05f;                            // rơi từ từ
+                if (viz_bars_[b] < 0) viz_bars_[b] = 0;
+            }
+        }
+        for (int i = 0; i < VIZ_W * VIZ_H; i++) viz_buf_[i] = 0;  // nền đen
+        int bw = VIZ_W / VIZ_N;
+        int bar_w = bw - 3;                                       // hở khe giữa cột
+        for (int b = 0; b < VIZ_N; b++) {
+            int hh = (int)(viz_bars_[b] * (VIZ_H - 2));
+            if (hh < 1 && viz_bars_[b] > 0.02f) hh = 1;
+            int x0 = b * bw + 1;
+            for (int y = VIZ_H - hh; y < VIZ_H; y++) {
+                float t = (float)(VIZ_H - y) / (float)VIZ_H;      // đỉnh nhạt, đáy đậm
+                uint16_t c = __builtin_bswap16(VizRgb565(
+                    (uint8_t)(0x40 + 0x70 * t), (uint8_t)(0xC0 + 0x30 * t), (uint8_t)(0xB0 + 0x40 * t)));
+                uint16_t* row = viz_buf_ + y * VIZ_W + x0;
+                for (int x = 0; x < bar_w; x++) row[x] = c;
+            }
+        }
+        disp->ShowViz(viz_buf_, VIZ_W, VIZ_H, 138);              // khu đáy (vùng tối của nền)
+    }
+    // Task riêng (KHÔNG chạy vẽ nặng trong esp_timer callback kẻo nghẽn timer/watchdog). Task sống bền, nghỉ khi viz_run_=false.
+    static void VizTaskLoop(void* arg) {
+        auto* self = static_cast<EspVocat*>(arg);
+        while (true) {
+            if (self->viz_run_ && self->media_active_) self->VizTick();
+            vTaskDelay(pdMS_TO_TICKS(66));                        // ~15 fps
+        }
+    }
+    void StartViz() {
+        if (viz_buf_ == nullptr) {
+            viz_buf_ = (uint16_t*)heap_caps_malloc(VIZ_W * VIZ_H * 2, MALLOC_CAP_SPIRAM);
+            if (viz_buf_ == nullptr) viz_buf_ = (uint16_t*)malloc(VIZ_W * VIZ_H * 2);
+        }
+        if (viz_buf_ == nullptr) return;
+        for (int b = 0; b < VIZ_N; b++) viz_bars_[b] = 0;
+        viz_run_ = true;
+        if (viz_task_ == nullptr) {
+            xTaskCreatePinnedToCore(VizTaskLoop, "media_viz", 3 * 1024, this, 3, &viz_task_, 0);
+        }
+    }
+    void StopViz() {
+        viz_run_ = false;
+        auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
+        if (disp != nullptr) disp->HideViz();
+    }
+
     void ShowMedia(const char* title, const char* author, int pos, int dur, const char* cover_url, bool show_bar) {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr) return;
@@ -935,11 +1012,14 @@ private:
         }
         esp_timer_stop(media_timer_);
         esp_timer_start_periodic(media_timer_, 1000000);           // tick mỗi 1s (giờ nhảy trên máy)
+        // Nhạc (không bar) -> bật visualizer; sách (có bar) -> tắt visualizer.
+        if (show_bar) StopViz(); else StartViz();
     }
 
     void HideMedia() {
         if (!media_active_) return;
         media_active_ = false;
+        StopViz();
         if (media_timer_ != nullptr) esp_timer_stop(media_timer_);
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr) return;
@@ -967,6 +1047,7 @@ private:
             emote_set_anim_visible(h, false);
             emote_unlock(h);
             emote_notify_all_refresh(h);
+            if (!media_bar_on_) StartViz();                        // đang phát NHẠC -> bật lại visualizer sau khi đóng panel
         }
     }
 

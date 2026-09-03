@@ -1,6 +1,11 @@
 #include "audio_service.h"
 #include <esp_log.h>
 #include <cstring>
+#include <atomic>
+
+// VoCat: mức âm OUTPUT gần nhất (peak 0..32767) cho visualizer nhạc trên màn. Board đọc qua vocat_audio_peak().
+static std::atomic<uint16_t> s_vocat_out_peak{0};
+uint16_t vocat_audio_peak() { return s_vocat_out_peak.load(std::memory_order_relaxed); }
 
 #define RATE_CVT_CFG(_src_rate, _dest_rate, _channel)        \
     (esp_ae_rate_cvt_cfg_t)                                  \
@@ -335,6 +340,17 @@ void AudioService::AudioOutputTask() {
 
         if (task->playback_id != 0 && callbacks_.on_playback_progress) {
             callbacks_.on_playback_progress(task->playback_id, task->media_position_ms);
+        }
+
+        // VoCat: đo peak chunk PCM output (lấy mẫu thưa cho rẻ) -> visualizer nhạc; tính TRƯỚC vì OutputData có thể move.
+        {
+            uint16_t pk = 0;
+            const auto& pcm = task->pcm;
+            for (size_t i = 0; i < pcm.size(); i += 8) {
+                int v = pcm[i]; if (v < 0) v = -v;
+                if (v > pk) pk = (uint16_t)v;
+            }
+            s_vocat_out_peak.store(pk, std::memory_order_relaxed);
         }
 
         codec_->OutputData(task->pcm);
