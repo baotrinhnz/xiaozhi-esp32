@@ -488,6 +488,7 @@ private:
     int media_dur_ = 0;                 // tổng thời lượng (giây)
     int64_t media_t0_us_ = 0;           // mốc thời gian bắt đầu hiện
     bool media_active_ = false;
+    bool media_bar_on_ = true;          // có vẽ thanh progress không (sách=có, nhạc=không)
     uint8_t low_battery_alert_mask_ = 0;
     int low_battery_plays_left_ = 0;
     int64_t next_low_battery_play_ms_ = 0;
@@ -849,14 +850,14 @@ private:
         emote_handle_t h = disp->GetEmoteHandle();
         emote_lock(h);
         if (media_time_ != nullptr) gfx_label_set_text(media_time_, line);
-        if (media_bar_fg_ != nullptr) gfx_label_set_text(media_bar_fg_, bar);
+        if (media_bar_on_ && media_bar_fg_ != nullptr) gfx_label_set_text(media_bar_fg_, bar);
         emote_unlock(h);
         emote_notify_all_refresh(h);
     }
 
     static void MediaTickCb(void* arg) { static_cast<EspVocat*>(arg)->UpdateMediaTimeLabel(); }
 
-    void ShowMedia(const char* title, const char* author, int pos, int dur, const char* cover_url) {
+    void ShowMedia(const char* title, const char* author, int pos, int dur, const char* cover_url, bool show_bar) {
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr) return;
         emote_handle_t h = disp->GetEmoteHandle();
@@ -894,16 +895,21 @@ private:
             gfx_obj_align(media_time_, GFX_ALIGN_CENTER, 0, time_ofs);
             gfx_obj_set_visible(media_time_, true);
         }
-        // Thanh progress = 1 label PLAIN vẽ bằng ký tự khối (█ đã phát / ░ còn lại). KHÔNG bg-enable nên không nuốt label khác.
-        if (media_bar_fg_ == nullptr) media_bar_fg_ = emote_create_obj_by_type(h, "label", "media_prog");
-        if (media_bar_fg_ != nullptr) {
-            gfx_label_set_font(media_bar_fg_, (void*)&vocat_vn_26);
-            gfx_label_set_color(media_bar_fg_, GFX_COLOR_HEX(0x7FD1C4));
-            gfx_obj_set_size(media_bar_fg_, 300, 40);
-            gfx_label_set_text(media_bar_fg_, "\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91");
-            gfx_label_set_text_align(media_bar_fg_, GFX_TEXT_ALIGN_CENTER);
-            gfx_obj_align(media_bar_fg_, GFX_ALIGN_CENTER, 0, prog_ofs);
-            gfx_obj_set_visible(media_bar_fg_, true);
+        // Thanh progress = 1 label PLAIN vẽ bằng ký tự khối (█ đã phát / ░ còn lại). Nhạc KHÔNG cần -> show_bar=false thì ẩn.
+        media_bar_on_ = show_bar;
+        if (show_bar) {
+            if (media_bar_fg_ == nullptr) media_bar_fg_ = emote_create_obj_by_type(h, "label", "media_prog");
+            if (media_bar_fg_ != nullptr) {
+                gfx_label_set_font(media_bar_fg_, (void*)&vocat_vn_26);
+                gfx_label_set_color(media_bar_fg_, GFX_COLOR_HEX(0x7FD1C4));
+                gfx_obj_set_size(media_bar_fg_, 300, 40);
+                gfx_label_set_text(media_bar_fg_, "\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91\xE2\x96\x91");
+                gfx_label_set_text_align(media_bar_fg_, GFX_TEXT_ALIGN_CENTER);
+                gfx_obj_align(media_bar_fg_, GFX_ALIGN_CENTER, 0, prog_ofs);
+                gfx_obj_set_visible(media_bar_fg_, true);
+            }
+        } else if (media_bar_fg_ != nullptr) {
+            gfx_obj_set_visible(media_bar_fg_, false);   // nhạc: ẩn thanh progress (nếu còn từ lần phát sách)
         }
         emote_set_anim_visible(h, false);                          // ẩn mặt mèo
         emote_unlock(h);
@@ -1003,13 +1009,14 @@ private:
             "self.screen.media_show",
             "Hiển thị màn đang phát NATIVE: tên bài/sách (chữ tự cuộn ngang) + thời gian (tự nhảy trên máy). "
             "Gọi 1 lần khi bắt đầu phát nhạc/sách nói. title=tên, pos=số giây đã phát, dur=tổng số giây, "
-            "cover=URL ảnh bìa (đã resize sẵn, để trống nếu không có).",
+            "cover=URL ảnh bìa (đã resize sẵn, để trống nếu không có), bar=1 hiện thanh tiến độ (sách) / 0 ẩn (nhạc).",
             PropertyList({
                 Property("title", kPropertyTypeString, std::string("")),
                 Property("author", kPropertyTypeString, std::string("")),
                 Property("pos", kPropertyTypeInteger, 0),
                 Property("dur", kPropertyTypeInteger, 0),
                 Property("cover", kPropertyTypeString, std::string("")),
+                Property("bar", kPropertyTypeInteger, 1),
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 std::string title = properties["title"].value<std::string>();
@@ -1017,7 +1024,8 @@ private:
                 int pos = properties["pos"].value<int>();
                 int dur = properties["dur"].value<int>();
                 std::string cover = properties["cover"].value<std::string>();
-                ShowMedia(title.c_str(), author.c_str(), pos, dur, cover.c_str());
+                int bar = properties["bar"].value<int>();
+                ShowMedia(title.c_str(), author.c_str(), pos, dur, cover.c_str(), bar != 0);
                 return true;
             });
     }
