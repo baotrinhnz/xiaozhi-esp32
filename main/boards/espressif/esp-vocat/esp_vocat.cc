@@ -497,7 +497,7 @@ private:
     bool media_bar_on_ = true;          // có vẽ thanh progress không (sách=có, nhạc=không)
     char media_artist_[64] = {0};       // ca sĩ (nhạc) -> hiện ở dòng "time": "ca sĩ · m:ss"
     // Visualizer nhạc (tự vẽ cột vào ảnh RGB565, refresh ~15fps theo mức âm)
-    static constexpr int VIZ_W = 200, VIZ_H = 46, VIZ_N = 16;
+    static constexpr int VIZ_W = 232, VIZ_H = 66, VIZ_N = 18;
     uint16_t* viz_buf_ = nullptr;
     float viz_bars_[VIZ_N] = {0};
     float viz_peak_[VIZ_N] = {0};           // "chấm đỉnh" giữ đỉnh rồi rơi từ từ (hiệu ứng peak-hold)
@@ -885,8 +885,8 @@ private:
         auto* disp = dynamic_cast<emote::EmoteDisplay*>(display_);
         if (disp == nullptr || !media_active_ || viz_buf_ == nullptr) return;
         float lvl = vocat_audio_peak() / 32768.0f;
+        lvl = powf(lvl, 0.42f) * 1.35f;                          // NHẠY hơn: nén mạnh + gain
         if (lvl > 1.0f) lvl = 1.0f;
-        lvl = powf(lvl, 0.55f);                                   // nén cho mức nhỏ cũng thấy
         for (int b = 0; b < VIZ_N; b++) {
             float shape = 0.55f + 0.45f * sinf(3.14159f * (b + 0.5f) / VIZ_N);   // giữa cao, mép thấp
             float flick = 0.75f + 0.25f * ((esp_random() & 0xFF) / 255.0f);
@@ -898,10 +898,12 @@ private:
                 viz_bars_[b] -= 0.05f;                            // rơi từ từ
                 if (viz_bars_[b] < 0) viz_bars_[b] = 0;
             }
-            if (viz_bars_[b] > viz_peak_[b]) {
-                viz_peak_[b] = viz_bars_[b];                      // chấm đỉnh nhảy lên theo cột
+            float ov = viz_bars_[b] + 0.12f;                     // đỉnh TƯNG cao hơn cột 1 chút (overshoot)
+            if (ov > 1.0f) ov = 1.0f;
+            if (ov > viz_peak_[b]) {
+                viz_peak_[b] = ov;                               // cú hit -> chấm bật cao hơn cột
             } else {
-                viz_peak_[b] -= 0.018f;                           // rồi rơi CHẬM hơn cột -> tách ra "tung lên rớt xuống"
+                viz_peak_[b] -= 0.016f;                           // rồi rơi CHẬM -> "tưng lên rớt xuống"
                 if (viz_peak_[b] < viz_bars_[b]) viz_peak_[b] = viz_bars_[b];
             }
         }
@@ -920,18 +922,20 @@ private:
                 uint16_t* row = viz_buf_ + y * VIZ_W + x0;
                 for (int x = 0; x < bar_w; x++) row[x] = c;
             }
-            // chấm đỉnh 3px (trắng): giữ đỉnh rồi rơi CHẬM hơn cột -> tách ra khi cột tụt (tung lên rớt xuống)
-            int py = VIZ_H - 2 - (int)(viz_peak_[b] * (VIZ_H - 4));
+            // CHẤM đỉnh (không phải vạch ngang): hẹp + canh giữa cột, hình gần vuông, trắng nổi bật
+            int py = VIZ_H - 4 - (int)(viz_peak_[b] * (VIZ_H - 8));
             if (viz_peak_[b] > 0.02f) {
-                for (int dy = 0; dy < 3; dy++) {
+                int dw = bar_w < 5 ? bar_w : 5;                  // bề rộng chấm ~5px
+                int dx = x0 + (bar_w - dw) / 2;                  // canh giữa cột
+                for (int dy = 0; dy < 4; dy++) {                 // cao 4px -> gần tròn
                     int yy = py + dy;
                     if (yy < 0 || yy >= VIZ_H) continue;
-                    uint16_t* row = viz_buf_ + yy * VIZ_W + x0;
-                    for (int x = 0; x < bar_w; x++) row[x] = DOT;
+                    uint16_t* row = viz_buf_ + yy * VIZ_W + dx;
+                    for (int x = 0; x < dw; x++) row[x] = DOT;
                 }
             }
         }
-        disp->ShowViz(viz_buf_, VIZ_W, VIZ_H, 138);              // khu đáy (vùng tối của nền)
+        disp->ShowViz(viz_buf_, VIZ_W, VIZ_H, 110);              // khu đáy (vùng tối), to hơn nên đẩy lên chút
     }
     // Task riêng (KHÔNG chạy vẽ nặng trong esp_timer callback). CHÍNH task tự ẩn viz khi viz_run_=false ->
     // tránh race "ẩn chéo luồng" làm frame dở ShowViz lại đè -> viz kẹt sau khi ngừng nhạc.
@@ -973,10 +977,11 @@ private:
         (void)dur;                                             // dur qua media_dur_
         strncpy(media_artist_, author ? author : "", sizeof(media_artist_) - 1);   // ca sĩ -> hiện ở dòng time (nhạc)
         media_artist_[sizeof(media_artist_) - 1] = '\0';
-        // Bìa dim+gradient phủ FULL màn -> chữ đặt ở KHU ĐÁY (vùng tối). Không bìa -> chữ căn giữa trên nền đen.
-        const int title_ofs = has_cover ? 58 : -34;    // GFX_ALIGN_CENTER y offset (center=180)
-        const int time_ofs  = has_cover ? 96 : 6;
-        const int prog_ofs  = has_cover ? 132 : 44;    // thanh progress (label ký tự ▓░) dưới dòng giờ
+        // NHẠC (show_bar=false): tựa lên GIỮA + dòng ca sĩ, chừa đáy cho visualizer TO. SÁCH: tựa/giờ/bar ở khu đáy.
+        const bool music = !show_bar;
+        const int title_ofs = has_cover ? (music ? -14 : 58) : (music ? -30 : -34);  // GFX_ALIGN_CENTER y offset (center=180)
+        const int time_ofs  = has_cover ? (music ? 24 : 96) : (music ? 8 : 6);
+        const int prog_ofs  = has_cover ? 132 : 44;    // thanh progress (chỉ SÁCH) dưới dòng giờ
         // Tạo obj ảnh nền TRƯỚC MỌI label (kể cả khi chưa có bìa) -> nền luôn nằm DƯỚI chữ (z-order theo thứ tự tạo).
         disp->CreateMediaCoverObj();
         if (!has_cover) disp->HideMediaCover();                     // không bìa -> ẩn nền cũ (nếu còn); tự khoá, NGOÀI lock
