@@ -476,6 +476,12 @@ private:
     esp_timer_handle_t emotion_reset_timer_ = nullptr;
     bool bmi270_ready_ = false;
     bool was_charging_ = false;
+    // ===== Idle -> ngáp -> ngủ (poll trạng thái, VoCat-local, không đụng application.cc) =====
+    esp_timer_handle_t idle_sleep_timer_ = nullptr;   // poll định kỳ
+    int idle_ticks_ = 0;                               // số chu kỳ ở idle liên tục
+    static constexpr int kIdlePollMs  = 3000;         // poll mỗi 3s
+    static constexpr int kYawnAtTick  = 20;           // 20*3s = 60s idle -> NGÁP
+    static constexpr int kSleepAtTick = 21;           // +3s -> NGỦ (ngáp ~3s rồi ngủ)
     // ===== VoCat panel mode (màn hình page: đồng hồ/lịch/thời tiết từ NAS, vuốt đổi) =====
     static constexpr const char* PANEL_HOST = "http://192.168.1.4:8080";
     bool panel_active_ = false;
@@ -515,6 +521,25 @@ private:
         auto* self = static_cast<EspVocat*>(arg);
         if (self && self->display_ != nullptr) {
             self->display_->SetEmotion("neutral");
+        }
+    }
+
+    // Poll idle: đủ 60s không tương tác -> NGÁP, thêm 3s -> NGỦ. Có tương tác -> reset
+    // (khi thoát idle, state handler ở application.cc tự set lại mặt nên khỏi reset mặt ở đây).
+    static void idle_sleep_timer_callback(void* arg) {
+        auto* self = static_cast<EspVocat*>(arg);
+        if (self == nullptr || self->display_ == nullptr) {
+            return;
+        }
+        if (Application::GetInstance().GetDeviceState() != kDeviceStateIdle) {
+            self->idle_ticks_ = 0;                     // đang hoạt động -> quên chuyện ngủ
+            return;
+        }
+        self->idle_ticks_++;
+        if (self->idle_ticks_ == kYawnAtTick) {
+            self->display_->SetEmotion("yawn");        // ngáp
+        } else if (self->idle_ticks_ == kSleepAtTick) {
+            self->display_->SetEmotion("asleep");      // ngủ (giữ tới khi có tương tác)
         }
     }
 
@@ -1530,6 +1555,11 @@ public:
             esp_timer_delete(emotion_reset_timer_);
             emotion_reset_timer_ = nullptr;
         }
+        if (idle_sleep_timer_ != nullptr) {
+            esp_timer_stop(idle_sleep_timer_);
+            esp_timer_delete(idle_sleep_timer_);
+            idle_sleep_timer_ = nullptr;
+        }
 
         // Disable temperature sensor
         if (temp_sensor != NULL) {
@@ -1548,6 +1578,17 @@ public:
             .skip_unhandled_events = true,
         };
         ESP_ERROR_CHECK(esp_timer_create(&emotion_timer_args, &emotion_reset_timer_));
+
+        // Timer poll idle -> ngáp -> ngủ (chạy suốt đời thiết bị)
+        const esp_timer_create_args_t idle_sleep_args = {
+            .callback = &EspVocat::idle_sleep_timer_callback,
+            .arg = this,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "idle_sleep",
+            .skip_unhandled_events = true,
+        };
+        ESP_ERROR_CHECK(esp_timer_create(&idle_sleep_args, &idle_sleep_timer_));
+        esp_timer_start_periodic(idle_sleep_timer_, (uint64_t)kIdlePollMs * 1000ULL);
 
         InitializeI2c();
         uint8_t pcb_version = DetectPcbVersion();
