@@ -479,9 +479,10 @@ private:
     // ===== Idle -> ngáp -> ngủ (poll trạng thái, VoCat-local, không đụng application.cc) =====
     esp_timer_handle_t idle_sleep_timer_ = nullptr;   // poll định kỳ
     int idle_ticks_ = 0;                               // số chu kỳ ở idle liên tục
-    static constexpr int kIdlePollMs  = 3000;         // poll mỗi 3s
-    static constexpr int kYawnAtTick  = 20;           // 20*3s = 60s idle -> NGÁP
-    static constexpr int kSleepAtTick = 21;           // +3s -> NGỦ (ngáp ~3s rồi ngủ)
+    bool slept_ = false;                               // đã ngủ chưa -> KHOÁ, không ngáp lặp lại
+    static constexpr int kIdlePollMs  = 1000;         // poll mỗi 1s (mịn hơn cho canh giờ ngáp/ngủ)
+    static constexpr int kYawnAtTick  = 60;           // 60s idle -> bắt đầu NGÁP
+    static constexpr int kSleepAtTick = 66;           // ngáp ~6s (~3 lần) rồi -> NGỦ và khoá
     // ===== VoCat panel mode (màn hình page: đồng hồ/lịch/thời tiết từ NAS, vuốt đổi) =====
     static constexpr const char* PANEL_HOST = "http://192.168.1.4:8080";
     bool panel_active_ = false;
@@ -532,14 +533,18 @@ private:
             return;
         }
         if (Application::GetInstance().GetDeviceState() != kDeviceStateIdle) {
-            self->idle_ticks_ = 0;                     // đang hoạt động -> quên chuyện ngủ
+            self->idle_ticks_ = 0; self->slept_ = false;   // wake/hoạt động -> quên; mặt do state handler set neutral
             return;
+        }
+        if (self->slept_) {
+            return;                                    // ĐÃ NGỦ -> im, KHÔNG ngáp lặp lại (giữ mặt ngủ tới khi có tương tác)
         }
         self->idle_ticks_++;
         if (self->idle_ticks_ == kYawnAtTick) {
-            self->display_->SetEmotion("yawn");        // ngáp
-        } else if (self->idle_ticks_ == kSleepAtTick) {
-            self->display_->SetEmotion("asleep");      // ngủ (giữ tới khi có tương tác)
+            self->display_->SetEmotion("yawn");        // bắt đầu ngáp (~3 lần trong cửa sổ kYawn..kSleep)
+        } else if (self->idle_ticks_ >= kSleepAtTick) {
+            self->display_->SetEmotion("asleep");      // ngủ và KHOÁ
+            self->slept_ = true;
         }
     }
 
